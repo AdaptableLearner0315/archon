@@ -97,13 +97,13 @@ class ClaudeClientSingleton {
 
     let response: Anthropic.Message;
     try {
-      response = await this.client.messages.create(params as Anthropic.MessageCreateParamsNonStreaming);
+      response = await this.client.messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming);
     } catch (err: unknown) {
       const error = err as { status?: number; message?: string };
       // Retry once on 5xx
       if (error.status && error.status >= 500) {
         await new Promise((r) => setTimeout(r, 2000));
-        response = await this.client.messages.create(params as Anthropic.MessageCreateParamsNonStreaming);
+        response = await this.client.messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming);
       } else if (error.status === 429) {
         throw new Error('Rate limited by Claude API. Please try again in a moment.');
       } else {
@@ -150,7 +150,7 @@ class ClaudeClientSingleton {
       params.max_tokens = mc.maxTokens + mc.thinkingBudget;
     }
 
-    const stream = this.client.messages.stream(params as Anthropic.MessageCreateParamsStreaming);
+    const stream = this.client.messages.stream(params as unknown as Anthropic.MessageCreateParamsStreaming);
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
