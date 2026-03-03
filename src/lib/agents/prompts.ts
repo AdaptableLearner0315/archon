@@ -45,3 +45,73 @@ You have access to these agents:
 Respond in character as the most relevant agent. If multiple agents are needed, respond as each one briefly. Format your response naturally — be concise and action-oriented. Always indicate which agent is speaking by prefixing with their name.
 
 Important: Focus on REAL, ACTIONABLE outputs — not vague suggestions. If asked to write code, write real code. If asked to draft an email, draft a real email. Depth over breadth.`;
+
+export function buildAgentSystemPrompt(
+  role: AgentRole,
+  companyContext: string,
+  memoryContext?: import('../types').MemoryContext,
+  cycleContext?: string
+): string {
+  const basePrompt = AGENT_SYSTEM_PROMPTS[role];
+
+  const sections = [basePrompt];
+
+  // Communication protocol
+  sections.push(`
+## Inter-Agent Communication Protocol
+When you need information from another agent, use this format:
+[REQUEST: AgentName | what you need from them]
+
+When sharing a decision or insight for the team:
+[DECISION: topic-name] Your decision and reasoning...
+
+When sharing a topic-specific insight:
+[TOPIC: topic-name] Your insight...
+
+Stay focused on your role. Be concise and actionable.`);
+
+  // Company context
+  sections.push(`\nCompany Context:\n${companyContext}`);
+
+  // Memory context
+  if (memoryContext) {
+    const memSections: string[] = [];
+
+    if (memoryContext.longTermMemories.length > 0) {
+      memSections.push('## Company Knowledge');
+      for (const mem of memoryContext.longTermMemories) {
+        // Strip markers to prevent prompt injection from historical data
+        const clean = mem.summary.replace(/\[REQUEST:.*?\]/g, '').replace(/\[DECISION:.*?\]/g, '').trim();
+        memSections.push(`- [${mem.category}] ${clean}`);
+      }
+    }
+
+    if (memoryContext.shortTermMemories.length > 0) {
+      memSections.push('## Your Recent Context');
+      for (const mem of memoryContext.shortTermMemories) {
+        const clean = mem.content.replace(/\[REQUEST:.*?\]/g, '').replace(/\[DECISION:.*?\]/g, '').trim();
+        memSections.push(`- [${mem.memoryType}] ${clean.slice(0, 300)}`);
+      }
+    }
+
+    if (memoryContext.workingMemory.length > 0) {
+      memSections.push('## Current Cycle Context');
+      for (const mem of memoryContext.workingMemory) {
+        memSections.push(`- ${mem.key}: ${String(mem.value).slice(0, 200)}`);
+      }
+    }
+
+    if (memSections.length > 0) {
+      sections.push(memSections.join('\n'));
+    }
+  }
+
+  // Cycle context
+  if (cycleContext) {
+    sections.push(`\n## Cycle Delegations & Messages\n${cycleContext}`);
+  }
+
+  sections.push('\nExecute the following task with depth and precision. Provide real, actionable output — not vague suggestions.');
+
+  return sections.join('\n\n');
+}

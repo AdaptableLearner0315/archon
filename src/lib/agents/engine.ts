@@ -1,10 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { ORCHESTRATOR_PROMPT, AGENT_SYSTEM_PROMPTS } from './prompts';
-import type { AgentRole } from '../types';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+import { ClaudeClient } from './claude-client';
+import { ORCHESTRATOR_PROMPT, AGENT_SYSTEM_PROMPTS, buildAgentSystemPrompt } from './prompts';
+import type { AgentRole, MemoryContext } from '../types';
+import type Anthropic from '@anthropic-ai/sdk';
 
 export interface AgentResponse {
   agentRole: AgentRole;
@@ -12,7 +9,7 @@ export interface AgentResponse {
   content: string;
 }
 
-const AGENT_NAMES: Record<AgentRole, string> = {
+export const AGENT_NAMES: Record<AgentRole, string> = {
   ceo: 'Atlas',
   engineer: 'Forge',
   growth: 'Pulse',
@@ -25,42 +22,7 @@ const AGENT_NAMES: Record<AgentRole, string> = {
   'customer-success': 'Bloom',
 };
 
-export async function executeCommand(
-  directive: string,
-  companyContext: string,
-  history: { role: 'user' | 'assistant'; content: string }[] = []
-): Promise<AgentResponse[]> {
-  const systemPrompt = `${ORCHESTRATOR_PROMPT}
-
-Company Context:
-${companyContext}
-
-Respond as the relevant agent(s). Each agent response should be prefixed with the agent name like "**Atlas:** ..." or "**Forge:** ...".`;
-
-  const messages: Anthropic.MessageParam[] = [
-    ...history.map((h) => ({
-      role: h.role as 'user' | 'assistant',
-      content: h.content,
-    })),
-    { role: 'user', content: directive },
-  ];
-
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
-    system: systemPrompt,
-    messages,
-  });
-
-  const text = response.content
-    .filter((c): c is Anthropic.TextBlock => c.type === 'text')
-    .map((c) => c.text)
-    .join('\n');
-
-  return parseAgentResponses(text);
-}
-
-function parseAgentResponses(text: string): AgentResponse[] {
+export function parseAgentResponses(text: string): AgentResponse[] {
   const responses: AgentResponse[] = [];
   const agentPattern = /\*\*(\w+):\*\*\s*([\s\S]*?)(?=\*\*\w+:\*\*|$)/g;
   let match;
@@ -81,7 +43,6 @@ function parseAgentResponses(text: string): AgentResponse[] {
     }
   }
 
-  // If no agent pattern found, attribute to CEO
   if (responses.length === 0) {
     responses.push({
       agentRole: 'ceo',
@@ -93,15 +54,20 @@ function parseAgentResponses(text: string): AgentResponse[] {
   return responses;
 }
 
-export async function* streamCommand(
+export async function executeCommand(
   directive: string,
   companyContext: string,
-  history: { role: 'user' | 'assistant'; content: string }[] = []
-): AsyncGenerator<string> {
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+  memoryContext?: MemoryContext
+): Promise<AgentResponse[]> {
+  const memorySection = memoryContext
+    ? `\n\n## Agent Memory Context\n${formatMemoryForPrompt(memoryContext)}`
+    : '';
+
   const systemPrompt = `${ORCHESTRATOR_PROMPT}
 
 Company Context:
-${companyContext}
+${companyContext}${memorySection}
 
 Respond as the relevant agent(s). Each agent response should be prefixed with the agent name like "**Atlas:** ..." or "**Forge:** ...".`;
 
@@ -113,19 +79,47 @@ Respond as the relevant agent(s). Each agent response should be prefixed with th
     { role: 'user', content: directive },
   ];
 
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
+  const result = await ClaudeClient.call({
+    useCase: 'command_center',
     system: systemPrompt,
     messages,
   });
 
-  for await (const event of stream) {
-    if (
-      event.type === 'content_block_delta' &&
-      event.delta.type === 'text_delta'
-    ) {
-      yield event.delta.text;
+  return parseAgentResponses(result.text);
+}
+
+export async function* streamCommand(
+  directive: string,
+  companyContext: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+  memoryContext?: MemoryContext
+): AsyncGenerator<string> {
+  const memorySection = memoryContext
+    ? `\n\n## Agent Memory Context\n${formatMemoryForPrompt(memoryContext)}`
+    : '';
+
+  const systemPrompt = `${ORCHESTRATOR_PROMPT}
+
+Company Context:
+${companyContext}${memorySection}
+
+Respond as the relevant agent(s). Each agent response should be prefixed with the agent name like "**Atlas:** ..." or "**Forge:** ...".`;
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((h) => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.content,
+    })),
+    { role: 'user', content: directive },
+  ];
+
+  for await (const chunk of ClaudeClient.stream({
+    useCase: 'command_center',
+    system: systemPrompt,
+    messages,
+  })) {
+    if (chunk.type === 'text') {
+      yield chunk.content;
     }
   }
 }
@@ -133,24 +127,48 @@ Respond as the relevant agent(s). Each agent response should be prefixed with th
 export async function runAgentTask(
   role: AgentRole,
   task: string,
-  companyContext: string
-): Promise<string> {
-  const systemPrompt = `${AGENT_SYSTEM_PROMPTS[role]}
+  companyContext: string,
+  memoryContext?: MemoryContext,
+  cycleContext?: string
+): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number }; costUsd: number }> {
+  const systemPrompt = buildAgentSystemPrompt(role, companyContext, memoryContext, cycleContext);
 
-Company Context:
-${companyContext}
-
-Execute the following task with depth and precision. Provide real, actionable output — not vague suggestions.`;
-
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
+  const result = await ClaudeClient.call({
+    useCase: 'agent_task',
     system: systemPrompt,
     messages: [{ role: 'user', content: task }],
   });
 
-  return response.content
-    .filter((c): c is Anthropic.TextBlock => c.type === 'text')
-    .map((c) => c.text)
-    .join('\n');
+  return {
+    text: result.text,
+    usage: result.usage,
+    costUsd: result.costUsd,
+  };
+}
+
+function formatMemoryForPrompt(context: MemoryContext): string {
+  const sections: string[] = [];
+
+  if (context.longTermMemories.length > 0) {
+    sections.push('### Company Knowledge');
+    for (const mem of context.longTermMemories) {
+      sections.push(`- [${mem.category}] ${mem.summary}`);
+    }
+  }
+
+  if (context.shortTermMemories.length > 0) {
+    sections.push('### Recent Context');
+    for (const mem of context.shortTermMemories) {
+      sections.push(`- [${mem.memoryType}] ${mem.content.slice(0, 300)}`);
+    }
+  }
+
+  if (context.workingMemory.length > 0) {
+    sections.push('### Current Cycle Context');
+    for (const mem of context.workingMemory) {
+      sections.push(`- ${mem.key}: ${String(mem.value).slice(0, 200)}`);
+    }
+  }
+
+  return sections.join('\n');
 }

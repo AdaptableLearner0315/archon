@@ -137,3 +137,239 @@ create index idx_metrics_company on metrics(company_id, created_at desc);
 create index idx_messages_company on command_messages(company_id, created_at desc);
 create index idx_companies_slug on companies(slug);
 create index idx_companies_user on companies(user_id);
+
+-- ============================================================
+-- Intelligence Layer Schema
+-- ============================================================
+
+-- Alter companies: add cycle scheduling
+alter table companies add column if not exists cycle_schedule text not null default 'daily' check (cycle_schedule in ('manual', 'daily', 'weekly'));
+alter table companies add column if not exists cycle_time_utc text not null default '02:00';
+
+-- Alter agent_configs: add prompt/thinking config
+alter table agent_configs add column if not exists custom_prompt_additions text;
+alter table agent_configs add column if not exists max_tokens_per_call integer default 4096;
+alter table agent_configs add column if not exists use_extended_thinking boolean default false;
+alter table agent_configs add column if not exists thinking_budget integer default 2048;
+
+-- Operating cycles
+create table if not exists operating_cycles (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  status text not null default 'pending' check (status in ('pending', 'planning', 'executing', 'completing', 'notifying', 'done', 'failed')),
+  trigger text not null default 'manual' check (trigger in ('manual', 'scheduled', 'api')),
+  plan jsonb,
+  user_directive text,
+  total_tokens_used integer default 0,
+  total_cost_usd numeric default 0,
+  started_at timestamptz default now(),
+  completed_at timestamptz,
+  error text,
+  created_at timestamptz default now()
+);
+
+-- Cycle tasks
+create table if not exists cycle_tasks (
+  id uuid default gen_random_uuid() primary key,
+  cycle_id uuid references operating_cycles(id) on delete cascade not null,
+  company_id uuid references companies(id) on delete cascade not null,
+  agent_role text not null,
+  agent_name text not null,
+  description text not null,
+  status text not null default 'pending' check (status in ('pending', 'running', 'needs_data', 'completed', 'failed', 'blocked')),
+  result text,
+  depends_on text[] default '{}',
+  tokens_used integer default 0,
+  cost_usd numeric default 0,
+  started_at timestamptz,
+  completed_at timestamptz,
+  error text,
+  created_at timestamptz default now()
+);
+
+-- Agent messages (inter-agent communication)
+create table if not exists agent_messages (
+  id uuid default gen_random_uuid() primary key,
+  cycle_id uuid references operating_cycles(id) on delete cascade not null,
+  company_id uuid references companies(id) on delete cascade not null,
+  from_role text not null,
+  to_role text, -- null = broadcast
+  type text not null default 'request' check (type in ('request', 'response', 'broadcast', 'delegation')),
+  priority text not null default 'normal' check (priority in ('normal', 'urgent')),
+  subject text not null,
+  body text not null,
+  payload jsonb,
+  correlation_id uuid,
+  created_at timestamptz default now()
+);
+
+-- Short-term memory (Tier 2)
+create table if not exists agent_memory_short_term (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  agent_role text not null,
+  topic text not null,
+  content text not null,
+  memory_type text not null default 'insight' check (memory_type in ('decision', 'insight', 'task_result', 'conversation_summary', 'error', 'delegation')),
+  relevance_score numeric default 0.5,
+  expires_at timestamptz not null default (now() + interval '30 days'),
+  created_at timestamptz default now()
+);
+
+-- Long-term memory (Tier 3)
+create table if not exists agent_memory_long_term (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  agent_role text not null,
+  category text not null check (category in ('pattern', 'strategy', 'company_knowledge', 'agent_behavior', 'market_insight')),
+  summary text not null,
+  confidence numeric default 0.5,
+  times_referenced integer default 0,
+  last_referenced_at timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+-- Agent performance tracking
+create table if not exists agent_performance (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  cycle_id uuid references operating_cycles(id) on delete cascade not null,
+  agent_role text not null,
+  tasks_completed integer default 0,
+  tasks_failed integer default 0,
+  avg_quality_score numeric default 0,
+  total_tokens_used integer default 0,
+  total_cost_usd numeric default 0,
+  score numeric default 0,
+  created_at timestamptz default now()
+);
+
+-- Prompt versions
+create table if not exists prompt_versions (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  agent_role text not null,
+  version integer not null default 1,
+  prompt_text text not null,
+  is_active boolean default false,
+  performance_before numeric,
+  performance_after numeric,
+  created_at timestamptz default now(),
+  unique(company_id, agent_role, version)
+);
+
+-- Notification preferences
+create table if not exists notification_preferences (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  email_enabled boolean default true,
+  email_address text,
+  whatsapp_enabled boolean default false,
+  whatsapp_number text,
+  digest_format text default 'detailed' check (digest_format in ('brief', 'detailed')),
+  created_at timestamptz default now(),
+  unique(company_id)
+);
+
+-- RLS for new tables
+alter table operating_cycles enable row level security;
+alter table cycle_tasks enable row level security;
+alter table agent_messages enable row level security;
+alter table agent_memory_short_term enable row level security;
+alter table agent_memory_long_term enable row level security;
+alter table agent_performance enable row level security;
+alter table prompt_versions enable row level security;
+alter table notification_preferences enable row level security;
+
+-- Operating cycles policies
+create policy "View own cycles" on operating_cycles
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own cycles" on operating_cycles
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own cycles" on operating_cycles
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass cycles" on operating_cycles
+  for all using (auth.role() = 'service_role');
+
+-- Cycle tasks policies
+create policy "View own cycle tasks" on cycle_tasks
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own cycle tasks" on cycle_tasks
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own cycle tasks" on cycle_tasks
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass cycle tasks" on cycle_tasks
+  for all using (auth.role() = 'service_role');
+
+-- Agent messages policies
+create policy "View own agent messages" on agent_messages
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own agent messages" on agent_messages
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass agent messages" on agent_messages
+  for all using (auth.role() = 'service_role');
+
+-- Short-term memory policies
+create policy "View own short term memory" on agent_memory_short_term
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own short term memory" on agent_memory_short_term
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Delete own short term memory" on agent_memory_short_term
+  for delete using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass short term memory" on agent_memory_short_term
+  for all using (auth.role() = 'service_role');
+
+-- Long-term memory policies
+create policy "View own long term memory" on agent_memory_long_term
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own long term memory" on agent_memory_long_term
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own long term memory" on agent_memory_long_term
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Delete own long term memory" on agent_memory_long_term
+  for delete using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass long term memory" on agent_memory_long_term
+  for all using (auth.role() = 'service_role');
+
+-- Agent performance policies
+create policy "View own performance" on agent_performance
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own performance" on agent_performance
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass performance" on agent_performance
+  for all using (auth.role() = 'service_role');
+
+-- Prompt versions policies
+create policy "View own prompts" on prompt_versions
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own prompts" on prompt_versions
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own prompts" on prompt_versions
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass prompts" on prompt_versions
+  for all using (auth.role() = 'service_role');
+
+-- Notification preferences policies
+create policy "View own notification prefs" on notification_preferences
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Upsert own notification prefs" on notification_preferences
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own notification prefs" on notification_preferences
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+
+-- Indexes for new tables
+create index idx_cycles_company on operating_cycles(company_id, created_at desc);
+create index idx_cycles_status on operating_cycles(company_id, status);
+create index idx_cycle_tasks_cycle on cycle_tasks(cycle_id, status);
+create index idx_cycle_tasks_company on cycle_tasks(company_id, agent_role, created_at desc);
+create index idx_agent_messages_cycle on agent_messages(cycle_id, created_at);
+create index idx_agent_messages_to on agent_messages(company_id, to_role, created_at desc);
+create index idx_agent_messages_correlation on agent_messages(correlation_id);
+create index idx_stm_agent on agent_memory_short_term(company_id, agent_role, created_at desc);
+create index idx_stm_topic on agent_memory_short_term(company_id, topic);
+create index idx_stm_expires on agent_memory_short_term(expires_at);
+create index idx_ltm_agent on agent_memory_long_term(company_id, agent_role, category);
+create index idx_ltm_referenced on agent_memory_long_term(company_id, last_referenced_at desc);
+create index idx_performance_agent on agent_performance(company_id, agent_role, created_at desc);
+create index idx_performance_cycle on agent_performance(cycle_id);
+create index idx_prompt_versions_active on prompt_versions(company_id, agent_role, is_active);

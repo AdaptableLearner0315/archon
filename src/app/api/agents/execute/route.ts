@@ -17,6 +17,11 @@ export async function POST(request: NextRequest) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 });
     }
 
+    // Validate input
+    if (typeof directive !== 'string' || directive.length > 10000) {
+      return new Response(JSON.stringify({ error: 'Invalid directive' }), { status: 400 });
+    }
+
     // Verify company ownership
     const { data: company } = await supabase
       .from('companies')
@@ -45,6 +50,49 @@ Ad Budget: ${company.ad_budget}
 Plan: ${company.plan}
     `.trim();
 
+    // Load memory context (short-term + long-term)
+    const [{ data: shortTermMem }, { data: longTermMem }] = await Promise.all([
+      supabase
+        .from('agent_memory_short_term')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(10),
+      supabase
+        .from('agent_memory_long_term')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('last_referenced_at', { ascending: false })
+        .limit(10),
+    ]);
+
+    const memoryContext = {
+      workingMemory: [],
+      shortTermMemories: (shortTermMem || []).map((m) => ({
+        id: m.id,
+        companyId: m.company_id,
+        agentRole: m.agent_role,
+        topic: m.topic,
+        content: m.content,
+        memoryType: m.memory_type,
+        relevanceScore: m.relevance_score,
+        expiresAt: m.expires_at,
+        createdAt: m.created_at,
+      })),
+      longTermMemories: (longTermMem || []).map((m) => ({
+        id: m.id,
+        companyId: m.company_id,
+        agentRole: m.agent_role,
+        category: m.category,
+        summary: m.summary,
+        confidence: m.confidence,
+        timesReferenced: m.times_referenced,
+        lastReferencedAt: m.last_referenced_at,
+        createdAt: m.created_at,
+      })),
+      tokenEstimate: 0,
+    };
+
     // Load recent message history
     const { data: history } = await supabase
       .from('command_messages')
@@ -67,7 +115,7 @@ Plan: ${company.plan}
         try {
           let fullText = '';
 
-          for await (const chunk of streamCommand(directive, companyContext, messageHistory)) {
+          for await (const chunk of streamCommand(directive, companyContext, messageHistory, memoryContext)) {
             fullText += chunk;
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`)
@@ -103,10 +151,19 @@ Plan: ${company.plan}
               company_id: companyId,
               agent_role: agentRole,
               agent_name: agentName,
-              action: `Executed directive`,
+              action: 'Executed directive',
               detail: content.slice(0, 200),
               type: 'action',
             });
+
+            // Store as short-term memory (conversation summary)
+            supabase.from('agent_memory_short_term').insert({
+              company_id: companyId,
+              agent_role: agentRole,
+              topic: 'command_response',
+              content: `Responded to: "${directive.slice(0, 100)}". Key points: ${content.slice(0, 500)}`,
+              memory_type: 'conversation_summary',
+            }).then(() => {}); // fire-and-forget
           }
 
           if (!hasAgent && fullText) {

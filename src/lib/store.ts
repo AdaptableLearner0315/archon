@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import type { AgentActivity, CommandMessage, KPIMetric, Agent, OnboardingState, AgentRole } from './types';
+import type {
+  AgentActivity,
+  CommandMessage,
+  KPIMetric,
+  Agent,
+  OnboardingState,
+  AgentRole,
+  OperatingCycle,
+  CycleTask,
+  CycleStreamEvent,
+} from './types';
 import { AGENTS } from './types';
 import { v4 as uuid } from 'uuid';
 
@@ -29,6 +39,16 @@ interface AppState {
   // Company
   companyId: string | null;
   setCompanyId: (id: string) => void;
+
+  // Operating Cycles
+  currentCycle: OperatingCycle | null;
+  setCycle: (cycle: OperatingCycle | null) => void;
+  cycleTasks: CycleTask[];
+  setCycleTasks: (tasks: CycleTask[]) => void;
+  updateCycleTask: (taskId: string, updates: Partial<CycleTask>) => void;
+  cycleEvents: CycleStreamEvent[];
+  addCycleEvent: (event: CycleStreamEvent) => void;
+  clearCycleEvents: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -79,4 +99,22 @@ export const useAppStore = create<AppState>((set) => ({
 
   companyId: null,
   setCompanyId: (id) => set({ companyId: id }),
+
+  // Operating Cycles
+  currentCycle: null,
+  setCycle: (cycle) => set({ currentCycle: cycle }),
+  cycleTasks: [],
+  setCycleTasks: (tasks) => set({ cycleTasks: tasks }),
+  updateCycleTask: (taskId, updates) =>
+    set((state) => ({
+      cycleTasks: state.cycleTasks.map((t) =>
+        t.id === taskId ? { ...t, ...updates } : t
+      ),
+    })),
+  cycleEvents: [],
+  addCycleEvent: (event) =>
+    set((state) => ({
+      cycleEvents: [...state.cycleEvents, event].slice(-500),
+    })),
+  clearCycleEvents: () => set({ cycleEvents: [] }),
 }));
