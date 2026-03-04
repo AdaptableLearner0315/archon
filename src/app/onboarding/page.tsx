@@ -17,6 +17,9 @@ import {
   Brain,
   BarChart3,
   TrendingUp,
+  Search,
+  Megaphone,
+  Globe,
 } from 'lucide-react';
 
 const GOALS = [
@@ -40,6 +43,11 @@ export default function OnboardingPage() {
   const [goal, setGoal] = useState<string>('');
   const [budget, setBudget] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  // Scale tier features (SEO + Ads)
+  const [seoEnabled, setSeoEnabled] = useState(false);
+  const [adsEnabled, setAdsEnabled] = useState(false);
+  const [websiteUrl, setWebsiteUrl] = useState('');
+  const [dailyAdBudget, setDailyAdBudget] = useState('');
 
   const handleComplete = async () => {
     setLoading(true);
@@ -58,6 +66,9 @@ export default function OnboardingPage() {
       .replace(/^-|-$/g, '')
       .slice(0, 50) + '-' + Math.random().toString(36).slice(2, 8);
 
+    // Determine plan based on features enabled
+    const plan = (seoEnabled || adsEnabled) ? 'scale' : 'starter';
+
     const { data: company, error } = await supabase
       .from('companies')
       .insert({
@@ -67,7 +78,11 @@ export default function OnboardingPage() {
         description: idea,
         goal,
         ad_budget: budget,
-        plan: 'starter',
+        plan,
+        website_url: websiteUrl || null,
+        daily_ad_budget: dailyAdBudget ? parseFloat(dailyAdBudget) : 0,
+        seo_enabled: seoEnabled,
+        ads_enabled: adsEnabled,
       })
       .select()
       .single();
@@ -106,7 +121,8 @@ export default function OnboardingPage() {
     (step === 1 && idea.trim().length > 5) ||
     (step === 2 && goal) ||
     (step === 3 && budget) ||
-    step === 4;
+    step === 4 || // SEO/Ads step - always can proceed (optional)
+    step === 5;
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6">
@@ -115,7 +131,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-2xl relative z-10">
         {/* Progress */}
         <div className="flex items-center gap-2 mb-8">
-          {[1, 2, 3, 4].map((s) => (
+          {[1, 2, 3, 4, 5].map((s) => (
             <div
               key={s}
               className={`h-1.5 flex-1 rounded-full transition-all ${
@@ -225,10 +241,120 @@ export default function OnboardingPage() {
             </motion.div>
           )}
 
-          {/* Step 4: Preview */}
+          {/* Step 4: SEO & Ads (Scale Features) */}
           {step === 4 && (
             <motion.div
               key="step4"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="bg-card border border-border rounded-2xl p-8"
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Megaphone className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold">Supercharge with SEO & Ads</h1>
+                  <p className="text-sm text-muted-foreground">Optional Scale tier features ($199/mo)</p>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                {/* SEO Toggle */}
+                <div className={`p-4 rounded-xl border transition ${
+                  seoEnabled ? 'border-primary bg-primary/10' : 'border-border bg-secondary/50'
+                }`}>
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <Search className={`w-5 h-5 ${seoEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <div>
+                        <p className="font-semibold text-sm">SEO Optimization (Scout)</p>
+                        <p className="text-xs text-muted-foreground">Keyword research, on-page SEO, technical audits</p>
+                      </div>
+                    </div>
+                    <div className={`w-12 h-6 rounded-full transition-all relative ${
+                      seoEnabled ? 'bg-primary' : 'bg-muted'
+                    }`} onClick={() => setSeoEnabled(!seoEnabled)}>
+                      <div className={`absolute w-5 h-5 rounded-full bg-white top-0.5 transition-all ${
+                        seoEnabled ? 'left-6' : 'left-0.5'
+                      }`} />
+                    </div>
+                  </label>
+
+                  {seoEnabled && (
+                    <div className="mt-4 pl-8">
+                      <label className="text-xs text-muted-foreground mb-1 block">Website URL to optimize</label>
+                      <input
+                        type="url"
+                        value={websiteUrl}
+                        onChange={(e) => setWebsiteUrl(e.target.value)}
+                        placeholder="https://yoursite.com"
+                        className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Ads Toggle */}
+                <div className={`p-4 rounded-xl border transition ${
+                  adsEnabled ? 'border-primary bg-primary/10' : 'border-border bg-secondary/50'
+                }`}>
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <Globe className={`w-5 h-5 ${adsEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <div>
+                        <p className="font-semibold text-sm">Paid Ads Management (Spark)</p>
+                        <p className="text-xs text-muted-foreground">Google, Meta, TikTok, LinkedIn campaigns</p>
+                      </div>
+                    </div>
+                    <div className={`w-12 h-6 rounded-full transition-all relative ${
+                      adsEnabled ? 'bg-primary' : 'bg-muted'
+                    }`} onClick={() => setAdsEnabled(!adsEnabled)}>
+                      <div className={`absolute w-5 h-5 rounded-full bg-white top-0.5 transition-all ${
+                        adsEnabled ? 'left-6' : 'left-0.5'
+                      }`} />
+                    </div>
+                  </label>
+
+                  {adsEnabled && (
+                    <div className="mt-4 pl-8">
+                      <label className="text-xs text-muted-foreground mb-1 block">Daily ad budget limit</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                        <input
+                          type="number"
+                          value={dailyAdBudget}
+                          onChange={(e) => setDailyAdBudget(e.target.value)}
+                          placeholder="100"
+                          min="0"
+                          className="w-full pl-7 pr-3 py-2 bg-secondary border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">Changes above 10% require your approval</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {(seoEnabled || adsEnabled) && (
+                <div className="mt-4 p-3 bg-primary/5 rounded-lg border border-primary/20">
+                  <p className="text-xs text-primary">
+                    <strong>Scale tier selected:</strong> You&apos;ll have access to 12 agents including Scout (SEO) and Spark (Ads). You can connect your ad platforms in settings after onboarding.
+                  </p>
+                </div>
+              )}
+
+              <p className="mt-4 text-xs text-muted-foreground">
+                Skip this step if you want to start with the Starter plan ($29/mo). You can upgrade anytime.
+              </p>
+            </motion.div>
+          )}
+
+          {/* Step 5: Preview */}
+          {step === 5 && (
+            <motion.div
+              key="step5"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -248,10 +374,20 @@ export default function OnboardingPage() {
                   <p className="font-medium capitalize">{goal}</p>
                 </div>
                 <div className="bg-secondary/50 rounded-xl p-4">
-                  <p className="text-sm text-muted-foreground mb-1">Ad Budget</p>
-                  <p className="font-medium">{budget}/mo</p>
+                  <p className="text-sm text-muted-foreground mb-1">Plan</p>
+                  <p className="font-medium capitalize">{(seoEnabled || adsEnabled) ? 'Scale ($199/mo)' : 'Starter ($29/mo)'}</p>
                 </div>
               </div>
+
+              {(seoEnabled || adsEnabled) && (
+                <div className="bg-primary/5 rounded-xl p-4 mb-4 border border-primary/20">
+                  <p className="text-sm font-medium text-primary mb-2">Scale Features Enabled:</p>
+                  <div className="flex gap-4 text-sm">
+                    {seoEnabled && <span className="flex items-center gap-1"><Search className="w-4 h-4" /> SEO</span>}
+                    {adsEnabled && <span className="flex items-center gap-1"><Globe className="w-4 h-4" /> Ads</span>}
+                  </div>
+                </div>
+              )}
 
               <p className="text-sm font-medium mb-3">First actions by your agents:</p>
               <div className="space-y-2">
@@ -261,6 +397,8 @@ export default function OnboardingPage() {
                   { icon: <TrendingUp className="w-4 h-4" />, name: 'Pulse', action: 'Research channels and create acquisition plan' },
                   { icon: <Brain className="w-4 h-4" />, name: 'Echo', action: 'Draft brand voice and first content pieces' },
                   { icon: <BarChart3 className="w-4 h-4" />, name: 'Lens', action: 'Run competitive analysis and market sizing' },
+                  ...(seoEnabled ? [{ icon: <Search className="w-4 h-4" />, name: 'Scout', action: 'Crawl website and run SEO audit' }] : []),
+                  ...(adsEnabled ? [{ icon: <Globe className="w-4 h-4" />, name: 'Spark', action: 'Analyze market and plan ad strategy' }] : []),
                 ].map((a) => (
                   <div key={a.name} className="flex items-center gap-3 py-2 px-3 bg-secondary/30 rounded-lg">
                     <div className="text-primary">{a.icon}</div>
@@ -285,13 +423,13 @@ export default function OnboardingPage() {
             Back
           </button>
 
-          {step < 4 ? (
+          {step < 5 ? (
             <button
               onClick={() => setStep(step + 1)}
               disabled={!canProceed}
               className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-accent text-white rounded-xl font-medium transition disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              Continue
+              {step === 4 ? (seoEnabled || adsEnabled ? 'Continue' : 'Skip') : 'Continue'}
               <ArrowRight className="w-4 h-4" />
             </button>
           ) : (

@@ -20,6 +20,8 @@ export const AGENT_NAMES: Record<AgentRole, string> = {
   support: 'Shield',
   'data-analyst': 'Lens',
   'customer-success': 'Bloom',
+  seo: 'Scout',
+  ads: 'Spark',
 };
 
 export function parseAgentResponses(text: string): AgentResponse[] {

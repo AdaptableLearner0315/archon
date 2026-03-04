@@ -5,10 +5,13 @@ import { CostTracker } from '../cost-tracker';
 import type { ContextBuilder } from '../memory/context-builder';
 
 const STARTER_AGENTS: AgentRole[] = ['ceo', 'engineer', 'growth', 'marketing'];
-const ALL_AGENTS: AgentRole[] = ['ceo', 'engineer', 'growth', 'marketing', 'product', 'operations', 'sales', 'support', 'data-analyst', 'customer-success'];
+const GROWTH_AGENTS: AgentRole[] = ['ceo', 'engineer', 'growth', 'marketing', 'product', 'operations', 'sales', 'support', 'data-analyst', 'customer-success'];
+const SCALE_AGENTS: AgentRole[] = [...GROWTH_AGENTS, 'seo', 'ads'];
 
 function getAvailableAgents(plan: string): AgentRole[] {
-  return plan === 'starter' ? STARTER_AGENTS : ALL_AGENTS;
+  if (plan === 'starter') return STARTER_AGENTS;
+  if (plan === 'scale') return SCALE_AGENTS;
+  return GROWTH_AGENTS;
 }
 
 export async function planCycle(

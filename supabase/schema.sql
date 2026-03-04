@@ -181,6 +181,10 @@ create table if not exists cycle_tasks (
   depends_on text[] default '{}',
   tokens_used integer default 0,
   cost_usd numeric default 0,
+  needs_human_input boolean default false,
+  human_input_question text,
+  human_input_response text,
+  human_input_responded_at timestamptz,
   started_at timestamptz,
   completed_at timestamptz,
   error text,
@@ -267,6 +271,11 @@ create table if not exists notification_preferences (
   whatsapp_enabled boolean default false,
   whatsapp_number text,
   digest_format text default 'detailed' check (digest_format in ('brief', 'detailed')),
+  digest_frequency text not null default 'hourly' check (digest_frequency in ('hourly', '6h', 'daily', 'weekly')),
+  slack_enabled boolean default false,
+  slack_webhook_url text,
+  webapp_enabled boolean default true,
+  last_digest_sent_at timestamptz,
   created_at timestamptz default now(),
   unique(company_id)
 );
@@ -357,11 +366,60 @@ create policy "Upsert own notification prefs" on notification_preferences
 create policy "Update own notification prefs" on notification_preferences
   for update using (company_id in (select id from companies where user_id = auth.uid()));
 
+-- In-app notifications
+create table if not exists notifications (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  type text not null check (type in ('digest', 'nudge', 'artifact', 'milestone')),
+  title text not null,
+  body text not null,
+  action_url text,
+  task_id uuid references cycle_tasks(id),
+  read boolean default false,
+  created_at timestamptz default now()
+);
+
+-- Proof of work artifacts
+create table if not exists artifacts (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  cycle_id uuid references operating_cycles(id),
+  task_id uuid references cycle_tasks(id),
+  agent_role text not null,
+  agent_name text not null,
+  title text not null,
+  type text not null check (type in ('report', 'code', 'strategy', 'content', 'analysis', 'email_draft', 'other')),
+  content text not null,
+  preview text not null default '',
+  created_at timestamptz default now()
+);
+
+-- RLS for notifications + artifacts
+alter table notifications enable row level security;
+alter table artifacts enable row level security;
+
+create policy "View own notifications" on notifications
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own notifications" on notifications
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass notifications" on notifications
+  for all using (auth.role() = 'service_role');
+
+create policy "View own artifacts" on artifacts
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass artifacts" on artifacts
+  for all using (auth.role() = 'service_role');
+
+-- Public artifacts viewable
+create policy "Public artifacts viewable" on artifacts
+  for select using (company_id in (select id from companies where is_public = true));
+
 -- Indexes for new tables
 create index idx_cycles_company on operating_cycles(company_id, created_at desc);
 create index idx_cycles_status on operating_cycles(company_id, status);
 create index idx_cycle_tasks_cycle on cycle_tasks(cycle_id, status);
 create index idx_cycle_tasks_company on cycle_tasks(company_id, agent_role, created_at desc);
+create index idx_cycle_tasks_human_input on cycle_tasks(company_id, needs_human_input) where needs_human_input = true;
 create index idx_agent_messages_cycle on agent_messages(cycle_id, created_at);
 create index idx_agent_messages_to on agent_messages(company_id, to_role, created_at desc);
 create index idx_agent_messages_correlation on agent_messages(correlation_id);
@@ -373,3 +431,88 @@ create index idx_ltm_referenced on agent_memory_long_term(company_id, last_refer
 create index idx_performance_agent on agent_performance(company_id, agent_role, created_at desc);
 create index idx_performance_cycle on agent_performance(cycle_id);
 create index idx_prompt_versions_active on prompt_versions(company_id, agent_role, is_active);
+create index idx_notifications_company on notifications(company_id, created_at desc);
+create index idx_notifications_unread on notifications(company_id, read) where read = false;
+create index idx_artifacts_company on artifacts(company_id, created_at desc);
+create index idx_artifacts_cycle on artifacts(cycle_id);
+
+-- ============================================================
+-- SEO + Ads Module Schema (v2.1)
+-- ============================================================
+
+-- Add SEO/Ads columns to companies
+alter table companies add column if not exists website_url text;
+alter table companies add column if not exists daily_ad_budget numeric default 0;
+alter table companies add column if not exists seo_enabled boolean default false;
+alter table companies add column if not exists ads_enabled boolean default false;
+
+-- SEO Audits table
+create table if not exists seo_audits (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  cycle_id uuid references operating_cycles(id),
+  url text not null,
+  audit_type text not null check (audit_type in ('technical', 'on_page', 'keywords')),
+  results jsonb not null,
+  score numeric,
+  created_at timestamptz default now()
+);
+
+-- Ad Platform Credentials (encrypted)
+create table if not exists ad_platform_credentials (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  platform text not null check (platform in ('google', 'meta', 'tiktok', 'linkedin')),
+  credentials_encrypted text not null,
+  account_id text,
+  is_active boolean default true,
+  created_at timestamptz default now(),
+  unique(company_id, platform)
+);
+
+-- Budget Changes Log
+create table if not exists budget_changes (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  platform text not null,
+  campaign_id text not null,
+  previous_budget numeric not null,
+  new_budget numeric not null,
+  change_percent numeric not null,
+  auto_approved boolean not null,
+  approved_by text,
+  reason text,
+  created_at timestamptz default now()
+);
+
+-- RLS for SEO + Ads tables
+alter table seo_audits enable row level security;
+alter table ad_platform_credentials enable row level security;
+alter table budget_changes enable row level security;
+
+create policy "View own seo audits" on seo_audits
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass seo audits" on seo_audits
+  for all using (auth.role() = 'service_role');
+
+create policy "View own ad credentials" on ad_platform_credentials
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own ad credentials" on ad_platform_credentials
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own ad credentials" on ad_platform_credentials
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Delete own ad credentials" on ad_platform_credentials
+  for delete using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass ad credentials" on ad_platform_credentials
+  for all using (auth.role() = 'service_role');
+
+create policy "View own budget changes" on budget_changes
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass budget changes" on budget_changes
+  for all using (auth.role() = 'service_role');
+
+-- Indexes for SEO + Ads tables
+create index idx_seo_audits_company on seo_audits(company_id, created_at desc);
+create index idx_seo_audits_url on seo_audits(company_id, url);
+create index idx_ad_credentials_company on ad_platform_credentials(company_id, platform);
+create index idx_budget_changes_company on budget_changes(company_id, created_at desc);

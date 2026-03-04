@@ -8,7 +8,9 @@ export type AgentRole =
   | 'sales'
   | 'support'
   | 'data-analyst'
-  | 'customer-success';
+  | 'customer-success'
+  | 'seo'    // Scout - SEO Specialist (Scale tier)
+  | 'ads';  // Spark - Ads Manager (Scale tier)
 
 export type AgentStatus = 'idle' | 'working' | 'completed' | 'error';
 
@@ -52,6 +54,11 @@ export interface Company {
   adBudget: string;
   plan: 'starter' | 'growth' | 'scale';
   createdAt: string;
+  // Scale tier SEO/Ads fields
+  websiteUrl?: string | null;
+  dailyAdBudget?: number;
+  seoEnabled?: boolean;
+  adsEnabled?: boolean;
 }
 
 export interface OnboardingState {
@@ -89,6 +96,9 @@ export const AGENTS: Omit<Agent, 'id' | 'status' | 'currentTask'>[] = [
   { role: 'support', name: 'Shield', title: 'Support', icon: '🛡️', autonomyLevel: 'full-auto' },
   { role: 'data-analyst', name: 'Lens', title: 'Data Analyst', icon: '📊', autonomyLevel: 'full-auto' },
   { role: 'customer-success', name: 'Bloom', title: 'Customer Success', icon: '🌱', autonomyLevel: 'full-auto' },
+  // Scale tier agents
+  { role: 'seo', name: 'Scout', title: 'SEO Specialist', icon: '🔍', autonomyLevel: 'full-auto' },
+  { role: 'ads', name: 'Spark', title: 'Ads Manager', icon: '💰', autonomyLevel: 'approve-big' },
 ];
 
 // ============================================================
@@ -218,6 +228,10 @@ export interface CycleTask {
   dependsOn: string[]; // task IDs
   tokensUsed: number;
   costUsd: number;
+  needsHumanInput: boolean;
+  humanInputQuestion: string | null;
+  humanInputResponse: string | null;
+  humanInputRespondedAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
   error: string | null;
@@ -249,7 +263,7 @@ export interface OperatingCycle {
 }
 
 export interface CycleStreamEvent {
-  type: 'cycle_status' | 'task_status' | 'agent_thinking' | 'agent_text' | 'agent_done' | 'cycle_done' | 'error';
+  type: 'cycle_status' | 'task_status' | 'agent_thinking' | 'agent_text' | 'agent_done' | 'cycle_done' | 'human_input_needed' | 'error';
   cycleId: string;
   taskId?: string;
   agentRole?: AgentRole;
@@ -260,6 +274,8 @@ export interface CycleStreamEvent {
 }
 
 // --- Notification Types ---
+export type DigestFrequency = 'hourly' | '6h' | 'daily' | 'weekly';
+
 export interface NotificationPreferences {
   id: string;
   companyId: string;
@@ -268,4 +284,81 @@ export interface NotificationPreferences {
   whatsappEnabled: boolean;
   whatsappNumber: string | null;
   digestFormat: 'brief' | 'detailed';
+  digestFrequency: DigestFrequency;
+  slackEnabled: boolean;
+  slackWebhookUrl: string | null;
+  webappEnabled: boolean;
+  lastDigestSentAt: string | null;
+}
+
+export type NotificationType = 'digest' | 'nudge' | 'artifact' | 'milestone';
+
+export interface Notification {
+  id: string;
+  companyId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  taskId: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export type ArtifactType = 'report' | 'code' | 'strategy' | 'content' | 'analysis' | 'email_draft' | 'other';
+
+export interface Artifact {
+  id: string;
+  companyId: string;
+  cycleId: string | null;
+  taskId: string | null;
+  agentRole: AgentRole;
+  agentName: string;
+  title: string;
+  type: ArtifactType;
+  content: string;
+  preview: string;
+  createdAt: string;
+}
+
+// ============================================================
+// SEO + Ads Types (Scale tier)
+// ============================================================
+
+export type SEOAuditType = 'technical' | 'on_page' | 'keywords';
+
+export interface SEOAudit {
+  id: string;
+  companyId: string;
+  cycleId: string | null;
+  url: string;
+  auditType: SEOAuditType;
+  results: Record<string, unknown>;
+  score: number | null;
+  createdAt: string;
+}
+
+export type AdPlatform = 'google' | 'meta' | 'tiktok' | 'linkedin';
+
+export interface AdPlatformCredential {
+  id: string;
+  companyId: string;
+  platform: AdPlatform;
+  accountId: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface BudgetChange {
+  id: string;
+  companyId: string;
+  platform: string;
+  campaignId: string;
+  previousBudget: number;
+  newBudget: number;
+  changePercent: number;
+  autoApproved: boolean;
+  approvedBy: string | null;
+  reason: string | null;
+  createdAt: string;
 }
