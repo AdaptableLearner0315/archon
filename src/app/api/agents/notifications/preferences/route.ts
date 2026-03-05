@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 const E164_REGEX = /^\+[1-9]\d{1,14}$/;
+const VALID_DIGEST_FORMATS = ['brief', 'detailed'];
+const VALID_DIGEST_FREQUENCIES = ['hourly', '6h', 'daily', 'weekly'];
 
 export async function GET(request: NextRequest) {
   try {
@@ -43,6 +45,11 @@ export async function GET(request: NextRequest) {
         whatsapp_enabled: false,
         whatsapp_number: null,
         digest_format: 'detailed',
+        digest_frequency: 'hourly',
+        slack_enabled: false,
+        slack_webhook_url: null,
+        webapp_enabled: true,
+        last_digest_sent_at: null,
       },
     }), {
       status: 200,
@@ -64,7 +71,18 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { companyId, emailEnabled, emailAddress, whatsappEnabled, whatsappNumber, digestFormat } = body;
+    const {
+      companyId,
+      emailEnabled,
+      emailAddress,
+      whatsappEnabled,
+      whatsappNumber,
+      digestFormat,
+      digestFrequency,
+      slackEnabled,
+      slackWebhookUrl,
+      webappEnabled,
+    } = body;
 
     if (!companyId) {
       return new Response(JSON.stringify({ error: 'Missing companyId' }), { status: 400 });
@@ -90,8 +108,16 @@ export async function PUT(request: NextRequest) {
       return new Response(JSON.stringify({ error: 'Invalid WhatsApp number. Must be E.164 format (e.g., +1234567890)' }), { status: 400 });
     }
 
-    if (digestFormat && !['brief', 'detailed'].includes(digestFormat)) {
+    if (digestFormat && !VALID_DIGEST_FORMATS.includes(digestFormat)) {
       return new Response(JSON.stringify({ error: 'Invalid digest format' }), { status: 400 });
+    }
+
+    if (digestFrequency && !VALID_DIGEST_FREQUENCIES.includes(digestFrequency)) {
+      return new Response(JSON.stringify({ error: 'Invalid digest frequency. Must be one of: hourly, 6h, daily, weekly' }), { status: 400 });
+    }
+
+    if (slackWebhookUrl && typeof slackWebhookUrl === 'string' && !slackWebhookUrl.startsWith('https://hooks.slack.com/')) {
+      return new Response(JSON.stringify({ error: 'Invalid Slack webhook URL' }), { status: 400 });
     }
 
     const prefData = {
@@ -101,6 +127,10 @@ export async function PUT(request: NextRequest) {
       whatsapp_enabled: whatsappEnabled ?? false,
       whatsapp_number: whatsappNumber ?? null,
       digest_format: digestFormat ?? 'detailed',
+      digest_frequency: digestFrequency ?? 'hourly',
+      slack_enabled: slackEnabled ?? false,
+      slack_webhook_url: slackWebhookUrl ?? null,
+      webapp_enabled: webappEnabled ?? true,
     };
 
     // Upsert

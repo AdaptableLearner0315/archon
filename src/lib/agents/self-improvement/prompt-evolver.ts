@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AgentRole, PromptVersion, CycleRetrospective } from '../../types';
+import type { AgentRole, PromptVersion, CycleRetrospective, AgentLesson } from '../../types';
 import { ClaudeClient } from '../claude-client';
 import { AGENT_SYSTEM_PROMPTS } from '../prompts';
 import { getAgentTrend } from './scorer';
+import { getActiveLessonsForAgent, recordLessonImpact, deprecateLesson } from '../learning';
 
 const MAX_CHANGE_PERCENT: Record<string, number> = {
   starter: 0.10,
@@ -25,7 +26,59 @@ export async function getActivePrompt(
     .limit(1)
     .single();
 
-  return data?.prompt_text ?? AGENT_SYSTEM_PROMPTS[agentRole];
+  const basePrompt = data?.prompt_text ?? AGENT_SYSTEM_PROMPTS[agentRole];
+
+  // Get active lessons and inject them
+  const lessons = await getActiveLessonsForAgent(companyId, agentRole, supabase);
+
+  if (lessons.length === 0) {
+    return basePrompt;
+  }
+
+  // Build learned behaviors section
+  const learnedBehaviors = lessons
+    .map((lesson) => lesson.promptAddition)
+    .join('\n');
+
+  // Inject lessons after the core identity section
+  return `${basePrompt}
+
+## Learned Behaviors (from validated experience)
+${learnedBehaviors}`;
+}
+
+export async function getActivePromptWithLessons(
+  companyId: string,
+  agentRole: AgentRole,
+  supabase: SupabaseClient
+): Promise<{ prompt: string; lessons: AgentLesson[] }> {
+  const { data } = await supabase
+    .from('prompt_versions')
+    .select('prompt_text')
+    .eq('company_id', companyId)
+    .eq('agent_role', agentRole)
+    .eq('is_active', true)
+    .order('version', { ascending: false })
+    .limit(1)
+    .single();
+
+  const basePrompt = data?.prompt_text ?? AGENT_SYSTEM_PROMPTS[agentRole];
+  const lessons = await getActiveLessonsForAgent(companyId, agentRole, supabase);
+
+  if (lessons.length === 0) {
+    return { prompt: basePrompt, lessons: [] };
+  }
+
+  const learnedBehaviors = lessons
+    .map((lesson) => lesson.promptAddition)
+    .join('\n');
+
+  const fullPrompt = `${basePrompt}
+
+## Learned Behaviors (from validated experience)
+${learnedBehaviors}`;
+
+  return { prompt: fullPrompt, lessons };
 }
 
 export async function evolvePrompt(
@@ -128,6 +181,9 @@ export async function checkAutoRollback(
   currentScore: number,
   supabase: SupabaseClient
 ): Promise<boolean> {
+  let rolledBack = false;
+
+  // Check prompt versions
   const { data: latestPrompt } = await supabase
     .from('prompt_versions')
     .select('*')
@@ -138,42 +194,76 @@ export async function checkAutoRollback(
     .limit(1)
     .single();
 
-  if (!latestPrompt || latestPrompt.performance_before === null) return false;
+  if (latestPrompt && latestPrompt.performance_before !== null) {
+    const dropPercent = (latestPrompt.performance_before - currentScore) / latestPrompt.performance_before;
 
-  const dropPercent = (latestPrompt.performance_before - currentScore) / latestPrompt.performance_before;
-
-  if (dropPercent > 0.20) {
-    await supabase
-      .from('prompt_versions')
-      .update({ is_active: false, performance_after: currentScore })
-      .eq('id', latestPrompt.id);
-
-    const { data: previous } = await supabase
-      .from('prompt_versions')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('agent_role', agentRole)
-      .lt('version', latestPrompt.version)
-      .order('version', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (previous) {
+    if (dropPercent > 0.20) {
       await supabase
         .from('prompt_versions')
-        .update({ is_active: true })
-        .eq('id', previous.id);
-    }
+        .update({ is_active: false, performance_after: currentScore })
+        .eq('id', latestPrompt.id);
 
-    return true;
+      const { data: previous } = await supabase
+        .from('prompt_versions')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('agent_role', agentRole)
+        .lt('version', latestPrompt.version)
+        .order('version', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (previous) {
+        await supabase
+          .from('prompt_versions')
+          .update({ is_active: true })
+          .eq('id', previous.id);
+      }
+
+      rolledBack = true;
+    } else {
+      await supabase
+        .from('prompt_versions')
+        .update({ performance_after: currentScore })
+        .eq('id', latestPrompt.id);
+    }
   }
 
-  await supabase
-    .from('prompt_versions')
-    .update({ performance_after: currentScore })
-    .eq('id', latestPrompt.id);
+  // Check active lessons for performance impact
+  const lessons = await getActiveLessonsForAgent(companyId, agentRole, supabase);
 
-  return false;
+  for (const lesson of lessons) {
+    // Record current performance for active lessons
+    if (lesson.impactMetrics?.before && !lesson.impactMetrics?.after) {
+      await recordLessonImpact(lesson.id, lesson.impactMetrics.before, currentScore, supabase);
+
+      // Auto-deprecate if performance dropped >10% after lesson activation
+      const dropPercent = (lesson.impactMetrics.before - currentScore) / lesson.impactMetrics.before;
+      if (dropPercent > 0.10) {
+        await deprecateLesson(lesson.id, `Performance dropped ${Math.round(dropPercent * 100)}% after activation`, supabase);
+        rolledBack = true;
+      }
+    }
+  }
+
+  return rolledBack;
+}
+
+export async function activateLessonWithTracking(
+  lessonId: string,
+  currentPerformance: number,
+  supabase: SupabaseClient
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('agent_lessons')
+    .update({
+      status: 'active',
+      impact_before: currentPerformance,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', lessonId);
+
+  return !error;
 }
 
 function approximateChangeRatio(a: string, b: string): number {

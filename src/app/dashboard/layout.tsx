@@ -7,17 +7,27 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    redirect('/auth/login');
+  }
 
   if (!user) {
     redirect('/auth/login');
   }
 
-  const { data: company } = await supabase
+  const { data: companies } = await supabase
     .from('companies')
     .select('*')
     .eq('user_id', user.id)
-    .single();
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  const company = companies?.[0];
 
   if (!company) {
     redirect('/onboarding');

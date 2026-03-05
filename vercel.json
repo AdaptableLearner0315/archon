@@ -3,6 +3,14 @@
     {
       "path": "/api/agents/cycle/cron",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/social/cron",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/ads/testing/cron",
+      "schedule": "0 */4 * * *"
     }
   ]
 }

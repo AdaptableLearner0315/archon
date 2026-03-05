@@ -167,15 +167,14 @@ export async function runTask(
       blockedQuestion = blockedMatch[1];
 
       // Persist to DB
-      deps.supabase
+      await deps.supabase
         .from('cycle_tasks')
         .update({
           needs_human_input: true,
           human_input_question: blockedQuestion,
           status: 'needs_data',
         })
-        .eq('id', task.id)
-        .then(() => {});
+        .eq('id', task.id);
 
       onEvent({
         type: 'human_input_needed',

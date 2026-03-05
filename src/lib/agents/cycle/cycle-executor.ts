@@ -3,7 +3,10 @@ import type { AgentRole, CyclePlan, CycleTask, CycleStreamEvent } from '../../ty
 import { AGENT_NAMES } from '../engine';
 import { CostTracker } from '../cost-tracker';
 import { runTask, type TaskRunnerDeps } from './task-runner';
+import { sendNudge } from '../notifications/nudge';
 import { v4 as uuid } from 'uuid';
+import { createCreditManager } from '../../credits/manager';
+import { isTaskSignificant, generateReasoningAudit } from '../reflection/reasoning-audit';
 
 const TASK_TIMEOUT_MS = 60_000;
 const CYCLE_TIMEOUT_MS = 300_000; // 5 minutes
@@ -28,6 +31,10 @@ export async function executeCycle(
     dependsOn: [],
     tokensUsed: 0,
     costUsd: 0,
+    needsHumanInput: false,
+    humanInputQuestion: null,
+    humanInputResponse: null,
+    humanInputRespondedAt: null,
     startedAt: null,
     completedAt: null,
     error: null,
@@ -58,6 +65,32 @@ export async function executeCycle(
     }))
   );
 
+  // 2.5. Check credit balance before executing
+  const creditManager = createCreditManager(supabase);
+  const balance = await creditManager.getBalance(companyId);
+
+  if (!balance || balance.balance <= 0) {
+    onEvent({
+      type: 'cycle_status',
+      cycleId,
+      status: 'failed',
+      content: 'Insufficient credits. Please purchase more credits to continue.',
+      timestamp: new Date().toISOString(),
+    });
+
+    // Mark all tasks as blocked
+    for (const task of tasks) {
+      task.status = 'blocked';
+      task.error = 'Insufficient credits';
+      await supabase
+        .from('cycle_tasks')
+        .update({ status: 'blocked', error: 'Insufficient credits' })
+        .eq('id', task.id);
+    }
+
+    return tasks;
+  }
+
   // 3. Dependency-aware parallel execution
   const completed = new Set<string>();
   const failed = new Set<string>();
@@ -67,7 +100,7 @@ export async function executeCycle(
     type: 'cycle_status',
     cycleId,
     status: 'executing',
-    content: `Executing ${tasks.length} tasks...`,
+    content: `Executing ${tasks.length} tasks... (${balance.balance} credits available)`,
     timestamp: new Date().toISOString(),
   });
 
@@ -84,12 +117,32 @@ export async function executeCycle(
       break;
     }
 
-    // Check budget
+    // Check budget (legacy cost tracker)
     if (!CostTracker.checkBudget(cycleId)) {
       for (const task of tasks) {
         if (task.status === 'pending') {
           task.status = 'blocked';
           task.error = 'Budget exceeded';
+          failed.add(task.id);
+        }
+      }
+      break;
+    }
+
+    // Check credit balance before proceeding
+    const currentBalance = await creditManager.getBalance(companyId);
+    if (!currentBalance || currentBalance.balance <= 0) {
+      onEvent({
+        type: 'cycle_status',
+        cycleId,
+        status: 'paused',
+        content: 'Out of credits. Remaining tasks paused.',
+        timestamp: new Date().toISOString(),
+      });
+      for (const task of tasks) {
+        if (task.status === 'pending') {
+          task.status = 'blocked';
+          task.error = 'Insufficient credits';
           failed.add(task.id);
         }
       }
@@ -122,11 +175,11 @@ export async function executeCycle(
         task.status = 'running';
         task.startedAt = new Date().toISOString();
 
-        supabase
+        // Await database write to prevent race conditions
+        await supabase
           .from('cycle_tasks')
           .update({ status: 'running', started_at: task.startedAt })
-          .eq('id', task.id)
-          .then(() => {});
+          .eq('id', task.id);
 
         const result = await Promise.race([
           runTask(task, deps, onEvent),
@@ -172,12 +225,17 @@ export async function executeCycle(
                 dependsOn: [],
                 tokensUsed: 0,
                 costUsd: 0,
+                needsHumanInput: false,
+                humanInputQuestion: null,
+                humanInputResponse: null,
+                humanInputRespondedAt: null,
                 startedAt: null,
                 completedAt: null,
                 error: null,
               };
               tasks.push(newTask);
-              supabase.from('cycle_tasks').insert({
+              // Await database insert to ensure consistency
+              await supabase.from('cycle_tasks').insert({
                 id: newTask.id,
                 cycle_id: cycleId,
                 company_id: companyId,
@@ -186,7 +244,7 @@ export async function executeCycle(
                 description: newTask.description,
                 status: 'pending',
                 depends_on: [],
-              }).then(() => {});
+              });
             }
           }
 
@@ -194,6 +252,21 @@ export async function executeCycle(
           task.result = result.result;
           task.tokensUsed += result.tokensUsed;
           task.costUsd += result.costUsd;
+
+          // If task is blocked on human input (no inter-agent requests), send nudge
+          if (result.requests.length === 0) {
+            const { data: taskRow } = await supabase
+              .from('cycle_tasks')
+              .select('needs_human_input, human_input_question')
+              .eq('id', task.id)
+              .single();
+
+            if (taskRow?.needs_human_input && taskRow.human_input_question) {
+              sendNudge(companyId, task.id, task.agentRole, taskRow.human_input_question, supabase).catch(
+                (err) => console.error('Nudge failed:', err)
+              );
+            }
+          }
         } else if (result.status === 'completed') {
           task.status = 'completed';
           task.result = result.result;
@@ -202,10 +275,27 @@ export async function executeCycle(
           task.costUsd = result.costUsd;
           completed.add(task.id);
 
+          // Deduct credits for completed task
+          const creditCost = await creditManager.getTaskCost(task.agentRole, 'base');
+          await creditManager.deductCredits(companyId, creditCost, {
+            taskId: task.id,
+            agentRole: task.agentRole,
+            description: `Task: ${task.description.slice(0, 100)}`,
+          });
+
+          // Generate reasoning audit for significant tasks (non-blocking)
+          const taskPriority = plan.tasks.find((t) => t.agentRole === task.agentRole)?.priority ?? 5;
+          if (isTaskSignificant(task, taskPriority)) {
+            generateReasoningAudit(task, companyId, supabase).catch((err) =>
+              console.error('Reasoning audit failed:', err)
+            );
+          }
+
           // Check if any needs_data tasks can re-run
           await handleRerunTasks(tasks, task, deps, onEvent, completed);
 
-          supabase
+          // Await database update to ensure data consistency
+          await supabase
             .from('cycle_tasks')
             .update({
               status: 'completed',
@@ -214,23 +304,22 @@ export async function executeCycle(
               tokens_used: task.tokensUsed,
               cost_usd: task.costUsd,
             })
-            .eq('id', task.id)
-            .then(() => {});
+            .eq('id', task.id);
         } else {
           task.status = 'failed';
           task.error = result.result || 'Task failed';
           task.completedAt = new Date().toISOString();
           failed.add(task.id);
 
-          supabase
+          // Await failed status update
+          await supabase
             .from('cycle_tasks')
             .update({
               status: 'failed',
               error: task.error?.slice(0, 5000),
               completed_at: task.completedAt,
             })
-            .eq('id', task.id)
-            .then(() => {});
+            .eq('id', task.id);
         }
       } else {
         // Promise rejected (timeout or unexpected error)
@@ -243,15 +332,15 @@ export async function executeCycle(
           taskFromReady.completedAt = new Date().toISOString();
           failed.add(taskFromReady.id);
 
-          supabase
+          // Await timeout/rejection failure update
+          await supabase
             .from('cycle_tasks')
             .update({
               status: 'failed',
               error: taskFromReady.error?.slice(0, 5000),
               completed_at: taskFromReady.completedAt,
             })
-            .eq('id', taskFromReady.id)
-            .then(() => {});
+            .eq('id', taskFromReady.id);
         }
       }
     }

@@ -80,7 +80,7 @@ export default async function PublicDashboard({ params }: Props) {
       <nav className="border-b border-[#27272a]/50 bg-[#09090b]/90 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-[#6d28d9] flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
               <Zap className="w-4 h-4 text-white" />
             </div>
             <span className="text-sm font-medium text-[#a1a1aa]">Powered by</span>
@@ -88,7 +88,7 @@ export default async function PublicDashboard({ params }: Props) {
           </div>
           <Link
             href="/"
-            className="px-4 py-1.5 bg-[#6d28d9] hover:bg-[#7c3aed] text-white rounded-lg text-sm font-medium transition"
+            className="px-4 py-1.5 bg-primary hover:bg-accent text-white rounded-lg text-sm font-medium transition"
           >
             Build Your Own AI Company
           </Link>
@@ -101,7 +101,7 @@ export default async function PublicDashboard({ params }: Props) {
           <h1 className="text-3xl font-bold mb-2">{company.name}</h1>
           <p className="text-[#a1a1aa]">{company.description}</p>
           <div className="flex items-center gap-4 mt-3">
-            <span className="text-xs px-2 py-0.5 rounded-full bg-[#6d28d9]/10 text-[#a78bfa] border border-[#6d28d9]/20">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-accent border border-primary/20">
               Goal: {company.goal}
             </span>
             <span className="text-xs text-[#a1a1aa]">
@@ -131,7 +131,7 @@ export default async function PublicDashboard({ params }: Props) {
         {/* Activity Feed */}
         <div className="bg-[#18181b] border border-[#27272a] rounded-xl p-5 mb-8">
           <div className="flex items-center gap-2 mb-4">
-            <Activity className="w-4 h-4 text-[#6d28d9]" />
+            <Activity className="w-4 h-4 text-primary" />
             <h2 className="text-sm font-semibold text-[#a1a1aa] uppercase tracking-wider">
               Agent Activity
             </h2>
@@ -151,7 +151,7 @@ export default async function PublicDashboard({ params }: Props) {
                   </span>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-[#a78bfa]">{a.agent_name}</span>
+                      <span className="text-xs font-semibold text-accent">{a.agent_name}</span>
                       <span className="text-sm font-medium">{a.action}</span>
                     </div>
                     {a.detail && (

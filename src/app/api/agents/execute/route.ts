@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { streamCommand } from '@/lib/agents/engine';
+import { executeTeamTask, DEFAULT_TEAM, parseTeamCommand, shouldUseTeam } from '@/lib/agents/cycle/team-executor';
+import type { CycleStreamEvent } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,6 +35,136 @@ export async function POST(request: NextRequest) {
     if (!company) {
       return new Response(JSON.stringify({ error: 'Company not found' }), { status: 404 });
     }
+
+    // Check for /team command or auto-detect complex tasks
+    const isTeamCommand = directive.toLowerCase().startsWith('/team ');
+    const shouldAutoTeam = shouldUseTeam(directive);
+
+    if (isTeamCommand || shouldAutoTeam) {
+      const teamDirective = isTeamCommand ? parseTeamCommand(directive) : directive;
+
+      // Save user message first
+      await supabase.from('command_messages').insert({
+        company_id: companyId,
+        role: 'user',
+        content: directive,
+      });
+
+      // Build company context for team execution
+      const teamCompanyContext = `
+Company: ${companyName}
+Description: ${company.description}
+Goal: ${company.goal}
+Ad Budget: ${company.ad_budget}
+Plan: ${company.plan}
+      `.trim();
+
+      // Create an operating cycle for the team task
+      const { data: cycle } = await supabase.from('operating_cycles').insert({
+        company_id: companyId,
+        status: 'executing',
+        trigger: 'manual',
+        user_directive: teamDirective,
+        started_at: new Date().toISOString(),
+      }).select().single();
+
+      if (!cycle) {
+        return new Response(JSON.stringify({ error: 'Failed to create cycle' }), { status: 500 });
+      }
+
+      // Stream team task execution
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            // Build minimal deps for team execution
+            const { WorkingMemory } = await import('@/lib/agents/memory/working-memory');
+            const { ShortTermMemoryStore } = await import('@/lib/agents/memory/short-term');
+            const { LongTermMemoryStore } = await import('@/lib/agents/memory/long-term');
+            const { ContextBuilder } = await import('@/lib/agents/memory/context-builder');
+            const { MessageBus } = await import('@/lib/agents/message-bus');
+
+            const workingMemory = new WorkingMemory(cycle.id);
+            const shortTermStore = new ShortTermMemoryStore(supabase);
+            const longTermStore = new LongTermMemoryStore(supabase);
+            const contextBuilder = new ContextBuilder(workingMemory, shortTermStore, longTermStore);
+
+            const deps = {
+              supabase,
+              workingMemory,
+              shortTermStore,
+              contextBuilder,
+              messageBus: new MessageBus(cycle.id, companyId, supabase),
+              companyContext: teamCompanyContext,
+              companyPlan: company.plan,
+              companyId,
+            };
+
+            // Stream events to client
+            const streamEvent = (event: CycleStreamEvent) => {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+              );
+            };
+
+            // Execute team task
+            const result = await executeTeamTask(
+              cycle.id,
+              companyId,
+              {
+                description: teamDirective,
+                agents: DEFAULT_TEAM,
+                mergeStrategy: 'synthesize',
+              },
+              deps,
+              supabase,
+              streamEvent
+            );
+
+            // Save merged result as agent response
+            if (result.mergedResult) {
+              await supabase.from('command_messages').insert({
+                company_id: companyId,
+                role: 'agent',
+                agent_role: 'ceo',
+                agent_name: 'Atlas (Team Lead)',
+                content: result.mergedResult,
+              });
+
+              // Final text chunk for UI
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ text: result.mergedResult })}\n\n`)
+              );
+            }
+
+            // Update cycle status
+            await supabase.from('operating_cycles').update({
+              status: result.status === 'completed' ? 'done' : 'failed',
+              completed_at: new Date().toISOString(),
+            }).eq('id', cycle.id);
+
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          } catch (err) {
+            console.error('Team task error:', err);
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ error: 'Team task failed' })}\n\n`)
+            );
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+      });
+    }
+
+    // Continue with normal (non-team) execution below...
 
     // Save user message
     await supabase.from('command_messages').insert({

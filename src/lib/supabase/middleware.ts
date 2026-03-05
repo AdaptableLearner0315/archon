@@ -25,9 +25,20 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // Auth check failed (network error, 406, stale cookies, etc.)
+    // Clear stale auth cookies so the user doesn't get stuck in a loop
+    const cookieNames = request.cookies.getAll()
+      .filter(c => c.name.startsWith('sb-'))
+      .map(c => c.name);
+    for (const name of cookieNames) {
+      supabaseResponse.cookies.delete(name);
+    }
+  }
 
   const path = request.nextUrl.pathname;
 

@@ -34,7 +34,7 @@ export interface AgentActivity {
   action: string;
   detail: string;
   timestamp: string;
-  type: 'action' | 'insight' | 'milestone' | 'alert';
+  type: 'action' | 'insight' | 'milestone' | 'alert' | 'team';
 }
 
 export interface KPIMetric {
@@ -263,7 +263,20 @@ export interface OperatingCycle {
 }
 
 export interface CycleStreamEvent {
-  type: 'cycle_status' | 'task_status' | 'agent_thinking' | 'agent_text' | 'agent_done' | 'cycle_done' | 'human_input_needed' | 'error';
+  type:
+    | 'cycle_status'
+    | 'task_status'
+    | 'agent_thinking'
+    | 'agent_text'
+    | 'agent_done'
+    | 'cycle_done'
+    | 'human_input_needed'
+    | 'error'
+    // Team task events
+    | 'team_task_started'
+    | 'team_task_merging'
+    | 'team_task_completed'
+    | 'team_task_partial_failure';
   cycleId: string;
   taskId?: string;
   agentRole?: AgentRole;
@@ -271,6 +284,9 @@ export interface CycleStreamEvent {
   content?: string;
   status?: string;
   timestamp: string;
+  // Team task specific fields
+  teamTaskId?: string;
+  agents?: AgentRole[];
 }
 
 // --- Notification Types ---
@@ -362,3 +378,376 @@ export interface BudgetChange {
   reason: string | null;
   createdAt: string;
 }
+
+// ============================================================
+// Reflection Agent Types
+// ============================================================
+
+export type ReflectionPeriod = 'daily' | 'weekly';
+export type RecommendationCriticality = 'critical' | 'high' | 'medium' | 'low';
+export type RecommendationCategory = 'revenue' | 'growth' | 'operations' | 'competitive' | 'retention';
+
+export interface ReflectionKPIChange {
+  metric: string;
+  from: number | string;
+  to: number | string;
+  change: string;
+  isPositive: boolean;
+}
+
+export interface ReflectionSummary {
+  kpiChanges: ReflectionKPIChange[];
+  topWin: string;
+  topConcern: string;
+}
+
+export interface ReflectionSuggestedAction {
+  description: string;
+  agentRole: AgentRole;
+  directive: string;
+  estimatedImpact: string;
+}
+
+export interface ReflectionRecommendation {
+  id: string;
+  criticality: RecommendationCriticality;
+  category: RecommendationCategory;
+  title: string;
+  reasoning: string;
+  suggestedAction: ReflectionSuggestedAction;
+  triggerEnabled: boolean;
+}
+
+export interface ReflectionOutput {
+  id: string;
+  companyId: string;
+  period: ReflectionPeriod;
+  summary: ReflectionSummary;
+  recommendations: ReflectionRecommendation[];
+  overallHealthScore: number;
+  createdAt: string;
+}
+
+export type TriggerStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type TriggerSource = 'slack' | 'email' | 'voice' | 'webapp' | 'sms';
+
+export interface ReflectionTrigger {
+  id: string;
+  reflectionId: string;
+  recommendationId: string;
+  triggeredAt: string;
+  triggeredVia: TriggerSource;
+  cycleId: string | null;
+  status: TriggerStatus;
+}
+
+// ============================================================
+// Agent Reflection & Alignment System Types
+// ============================================================
+
+// --- Reasoning Audit Types ---
+export interface ReasoningAudit {
+  id: string;
+  taskId: string;
+  cycleId: string;
+  companyId: string;
+  agentRole: AgentRole;
+
+  // What was decided
+  decisionSummary: string;
+
+  // Reasoning trace
+  rationale: string[];
+
+  // Assumptions made
+  assumptions: string[];
+
+  // Alternatives considered
+  alternativesConsidered: { option: string; whyRejected: string }[];
+
+  // Identified risks
+  risksIdentified: string[];
+
+  // Confidence level (0-100)
+  confidenceScore: number;
+
+  // What would change the decision
+  invalidationTriggers: string[];
+
+  createdAt: string;
+}
+
+// --- Alignment System Types ---
+export interface AgentGoal {
+  id: string;
+  cycleId: string;
+  companyId: string;
+  agentRole: AgentRole;
+
+  // What the agent is optimizing for
+  goal: string;
+
+  // Metrics being tracked
+  metrics: string[];
+
+  // Planned actions
+  plannedActions: string[];
+
+  // Resources needed
+  resourcesNeeded: string[];
+
+  createdAt: string;
+}
+
+export type ConflictType = 'resource' | 'goal' | 'priority' | 'timing';
+export type ConflictSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface AlignmentConflict {
+  id: string;
+  cycleId: string;
+  companyId: string;
+  agents: [AgentRole, AgentRole];
+  conflictType: ConflictType;
+  description: string;
+  severity: ConflictSeverity;
+  resolution: string | null;
+  resolvedBy: 'atlas' | 'human' | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface AlignmentReport {
+  cycleId: string;
+  companyId: string;
+  overallScore: number; // 0-100
+
+  // Per-agent alignment with CEO priorities
+  agentAlignment: { agent: AgentRole; alignmentScore: number }[];
+
+  // Active conflicts
+  conflicts: AlignmentConflict[];
+
+  // Recommendations
+  suggestions: string[];
+
+  createdAt: string;
+}
+
+// --- Cycle Summary Types ---
+export interface CycleSummary {
+  id: string;
+  cycleId: string;
+  companyId: string;
+  cycleNumber: number;
+  duration: { planned: number; actual: number };
+
+  // One-liner
+  headline: string;
+
+  // What got done
+  completed: {
+    agent: AgentRole;
+    task: string;
+    outcome: 'success' | 'partial' | 'blocked';
+    highlight?: string;
+  }[];
+
+  // What's in progress
+  inProgress: { agent: AgentRole; task: string; blockedBy?: string }[];
+
+  // Metrics impact
+  metricsImpact: { metric: string; before: number; after: number; delta: string }[];
+
+  // Alignment score
+  alignmentScore: number;
+
+  // CEO's take
+  ceoComment: string;
+
+  // Next priority
+  nextPriority: string;
+
+  createdAt: string;
+}
+
+// --- Weekly Reflection Summary Types ---
+export type AgentTrend = 'up' | 'down' | 'stable';
+
+export interface WeeklyReflectionSummary {
+  id: string;
+  companyId: string;
+  weekOf: string;
+  cyclesCompleted: number;
+
+  // Top wins
+  wins: { what: string; impact: string; agent: AgentRole }[];
+
+  // Top concerns
+  concerns: { what: string; risk: string; owner: AgentRole }[];
+
+  // Agent rankings
+  agentRankings: { agent: AgentRole; score: number; trend: AgentTrend }[];
+
+  // Lessons learned
+  lessonsLearned: { lesson: string; evidence: string; agentRole: AgentRole }[];
+
+  // Alignment trend
+  alignmentTrend: { score: number; previousScore: number; conflicts: number };
+
+  // CEO assessment
+  ceoAssessment: {
+    whatWorked: string;
+    whatDidnt: string;
+    focusNextWeek: string;
+    riskToWatch: string;
+  };
+
+  // Human action items
+  humanActions: { action: string; urgency: 'now' | 'soon' | 'later'; context: string }[];
+
+  createdAt: string;
+}
+
+// --- Agent Learning Types ---
+export type LessonStatus = 'proposed' | 'validating' | 'active' | 'deprecated';
+
+export interface AgentLesson {
+  id: string;
+  companyId: string;
+  agentRole: AgentRole;
+
+  // What was learned
+  lesson: string;
+
+  // Evidence from cycles
+  evidence: { cycleId: string; outcome: string; relevance: string }[];
+
+  // Status progression
+  status: LessonStatus;
+
+  // Prompt addition when active
+  promptAddition: string;
+
+  // Performance impact if active
+  impactMetrics?: { before: number; after: number };
+
+  // Validation cycles required (increases with maturity)
+  requiredCycles: number;
+
+  // Cycles validated so far
+  validationCycles: number;
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- User Journey Review Types ---
+export type JourneyStage = 'awareness' | 'consideration' | 'purchase' | 'onboarding' | 'usage' | 'retention';
+export type JourneyHealth = 'healthy' | 'needs-attention' | 'critical';
+
+export interface UserJourneyReview {
+  id: string;
+  companyId: string;
+  reviewDate: string;
+
+  // Per-agent reflections on their touchpoints
+  agentReflections: {
+    agent: AgentRole;
+    touchpoints: string[];
+    frictionPoints: string[];
+    improvements: string[];
+  }[];
+
+  // Synthesized journey map
+  journeyStages: {
+    stage: JourneyStage;
+    health: JourneyHealth;
+    ownerAgents: AgentRole[];
+    issues: string[];
+    actions: string[];
+  }[];
+
+  // Overall score
+  experienceScore: number;
+
+  createdAt: string;
+}
+
+// --- Task Significance Config ---
+export interface TaskSignificanceConfig {
+  minPriority: number; // Tasks with priority <= this get audits
+  minCostUsd: number; // Tasks costing more than this get audits
+  strategicKeywords: string[]; // Keywords that trigger audits
+}
+
+// ============================================================
+// Team Task Types (4-Agent Parallel Execution)
+// ============================================================
+
+/** Supported merge strategies for team task results */
+export type TeamMergeStrategy = 'concatenate' | 'synthesize' | 'vote';
+
+/** Team task status progression */
+export type TeamTaskStatus = 'pending' | 'running' | 'merging' | 'completed' | 'failed';
+
+/**
+ * Configuration for a team task execution.
+ */
+export interface TeamTaskConfig {
+  /** Task description/directive */
+  description: string;
+
+  /** Agent roles to include (2-4 agents) */
+  agents: AgentRole[];
+
+  /** Strategy for merging agent outputs */
+  mergeStrategy: TeamMergeStrategy;
+}
+
+/**
+ * Result of a team task execution.
+ */
+export interface TeamTaskResult {
+  /** Unique team task ID */
+  teamTaskId: string;
+
+  /** Final status */
+  status: 'completed' | 'failed';
+
+  /** Error message if failed */
+  error?: string;
+
+  /** Individual agent results */
+  agentResults: {
+    role: AgentRole;
+    status: 'success' | 'failed';
+    result: string;
+    error?: string;
+  }[];
+
+  /** Merged result from all successful agents */
+  mergedResult: string | null;
+
+  /** Total credits consumed */
+  creditsUsed: number;
+}
+
+/**
+ * Team task record as stored in database.
+ */
+export interface TeamTask {
+  id: string;
+  cycleId: string;
+  companyId: string;
+  description: string;
+  agentRoles: AgentRole[];
+  status: TeamTaskStatus;
+  creditsReserved: number;
+  mergedResult: string | null;
+  mergeStrategy: TeamMergeStrategy;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+// Note: Team task event types are now integrated directly into CycleStreamEvent

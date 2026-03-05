@@ -17,3 +17,7 @@ export { encryptCredentials, decryptCredentials, validateEncryption } from './cr
 
 export { GoogleAdsClient, createGoogleAdsClient } from './platforms/google';
 export { MetaAdsClient, createMetaAdsClient } from './platforms/meta';
+export { TikTokAdsClient, createTikTokAdsClient } from './platforms/tiktok-ads';
+
+// Ad Testing Module
+export * from './testing';

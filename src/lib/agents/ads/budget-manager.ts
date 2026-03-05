@@ -186,7 +186,13 @@ async function executeBudgetChange(
         return await client.updateDailyBudget(campaignId, proposedBudget * 100);
       }
 
-      case 'tiktok':
+      case 'tiktok': {
+        const { createTikTokAdsClient } = await import('./platforms/tiktok-ads');
+        const client = createTikTokAdsClient(credentials as { accessToken: string; advertiserId: string });
+        // TikTok uses cents (1 dollar = 100 cents)
+        return await client.updateCampaignBudget(campaignId, proposedBudget * 100);
+      }
+
       case 'linkedin':
         return { success: false, message: `${platform} integration not yet implemented` };
 

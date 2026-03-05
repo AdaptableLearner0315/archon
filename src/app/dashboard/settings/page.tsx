@@ -17,6 +17,10 @@ import {
   Globe,
   ExternalLink,
   Trash2,
+  Building2,
+  AlertTriangle,
+  Plug,
+  ChevronRight,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -30,6 +34,11 @@ interface Preferences {
   slack_enabled: boolean;
   slack_webhook_url: string | null;
   webapp_enabled: boolean;
+}
+
+interface ProfileData {
+  business_idea: string;
+  biggest_pain_point: string;
 }
 
 const DEFAULT_PREFS: Preferences = {
@@ -62,6 +71,10 @@ export default function SettingsPage() {
   const [resolvedCompanyId, setResolvedCompanyId] = useState<string | null>(companyId);
   const [adCredentials, setAdCredentials] = useState<AdPlatformCredential[]>([]);
   const [companyPlan, setCompanyPlan] = useState<string>('starter');
+  const [profileData, setProfileData] = useState<ProfileData>({ business_idea: '', biggest_pain_point: '' });
+  const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -112,6 +125,24 @@ export default function SettingsPage() {
         // Ignore
       }
 
+      // Load profile data
+      try {
+        const { data: profile } = await supabase
+          .from('onboarding_profiles')
+          .select('business_idea, skipped')
+          .eq('company_id', cId)
+          .single();
+        if (profile) {
+          setProfileData({
+            business_idea: profile.business_idea || '',
+            biggest_pain_point: '',
+          });
+          setProfileIncomplete(profile.skipped === true && !profile.business_idea);
+        }
+      } catch {
+        // Ignore
+      }
+
       setLoading(false);
     };
     load();
@@ -156,6 +187,35 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveProfile = async () => {
+    const cId = resolvedCompanyId || companyId;
+    if (!cId) return;
+    setSavingProfile(true);
+    setError(null);
+    setProfileSaved(false);
+
+    try {
+      const supabase = createClient();
+      const { error: updateError } = await supabase
+        .from('onboarding_profiles')
+        .update({
+          business_idea: profileData.business_idea,
+          skipped: false, // Mark as complete
+        })
+        .eq('company_id', cId);
+
+      if (updateError) throw updateError;
+
+      setProfileSaved(true);
+      setProfileIncomplete(false);
+      setTimeout(() => setProfileSaved(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -180,10 +240,126 @@ export default function SettingsPage() {
             Dashboard
           </Link>
           <div className="h-5 w-px bg-border" />
-          <h1 className="text-lg font-semibold">Notification Settings</h1>
+          <h1 className="text-lg font-semibold">Settings</h1>
         </div>
 
+        {/* Navigation Cards */}
+        <div className="grid gap-3 mb-8">
+          <Link
+            href="/dashboard/settings/integrations"
+            className="flex items-center justify-between p-4 bg-card border border-border rounded-xl hover:border-primary/50 transition group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Plug className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Integrations</p>
+                <p className="text-xs text-muted-foreground">
+                  Connect Vercel, Twitter, YouTube and more
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition" />
+          </Link>
+        </div>
+
+        <h2 className="text-sm font-semibold text-muted-foreground mb-4">Notifications</h2>
+
         <div className="space-y-6">
+          {/* Profile Section */}
+          {profileIncomplete && (
+            <div id="profile" className="scroll-mt-24">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5 mb-6">
+                <div className="flex items-start gap-3 mb-4">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-amber-400">Complete Your Profile</h3>
+                    <p className="text-xs text-white/60 mt-1">
+                      Help your AI team understand your business better for personalized recommendations.
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1.5">
+                      What's your business or product about?
+                    </label>
+                    <textarea
+                      value={profileData.business_idea}
+                      onChange={(e) => setProfileData(p => ({ ...p, business_idea: e.target.value }))}
+                      placeholder="e.g., A SaaS platform that helps small businesses manage their social media..."
+                      rows={3}
+                      className="w-full px-3 py-2 text-sm bg-secondary/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1.5">
+                      What's your biggest challenge right now?
+                    </label>
+                    <textarea
+                      value={profileData.biggest_pain_point}
+                      onChange={(e) => setProfileData(p => ({ ...p, biggest_pain_point: e.target.value }))}
+                      placeholder="e.g., Finding time to create consistent content..."
+                      rows={2}
+                      className="w-full px-3 py-2 text-sm bg-secondary/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile || !profileData.business_idea.trim()}
+                    className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-black rounded-lg font-medium text-sm hover:bg-amber-400 transition disabled:opacity-50"
+                  >
+                    {savingProfile ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : profileSaved ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    {savingProfile ? 'Saving...' : profileSaved ? 'Saved!' : 'Save Profile'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Business Profile (Always visible) */}
+          <Section
+            icon={<Building2 className="w-5 h-5 text-emerald-400" />}
+            title="Business Profile"
+            description="Your business context for AI personalization"
+          >
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1.5">
+                  Business/Product Description
+                </label>
+                <textarea
+                  value={profileData.business_idea}
+                  onChange={(e) => setProfileData(p => ({ ...p, business_idea: e.target.value }))}
+                  placeholder="Describe what you're building..."
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm bg-secondary/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                />
+              </div>
+              <button
+                onClick={handleSaveProfile}
+                disabled={savingProfile || !profileData.business_idea.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary rounded-lg font-medium text-sm hover:bg-primary/20 transition disabled:opacity-50"
+              >
+                {savingProfile ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : profileSaved ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {savingProfile ? 'Saving...' : profileSaved ? 'Updated!' : 'Update Profile'}
+              </button>
+            </div>
+          </Section>
+
           {/* Digest Frequency */}
           <Section
             icon={<Clock className="w-5 h-5 text-primary" />}

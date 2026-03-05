@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { Zap, Mail, ArrowLeft, Loader2 } from 'lucide-react';
+import { Mail, ArrowLeft, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -34,44 +34,44 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-6">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
+    <div className="min-h-screen bg-black flex items-center justify-center px-6 grain">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-white/[0.02] via-transparent to-transparent" />
 
       <div className="w-full max-w-md relative z-10">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition mb-8"
+          className="inline-flex items-center gap-2 text-sm text-white/40 hover:text-white transition mb-8"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to home
         </Link>
 
-        <div className="bg-card border border-border rounded-2xl p-8">
+        <div className="glass rounded-2xl p-8">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Zap className="w-6 h-6 text-white" />
-            </div>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" className="text-white">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="currentColor" />
+            </svg>
             <div>
-              <h1 className="text-xl font-bold">Welcome to Archon</h1>
-              <p className="text-sm text-muted-foreground">Sign in to your AI organization</p>
+              <h1 className="text-xl font-bold text-white">Welcome to Archon</h1>
+              <p className="text-sm text-white/40">Sign in to your AI organization</p>
             </div>
           </div>
 
           {sent ? (
             <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                <Mail className="w-8 h-8 text-primary" />
+              <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+                <Mail className="w-8 h-8 text-emerald-400" />
               </div>
-              <h2 className="text-lg font-semibold mb-2">Check your email</h2>
-              <p className="text-muted-foreground text-sm mb-4">
-                We sent a magic link to <strong className="text-foreground">{email}</strong>
+              <h2 className="text-lg font-semibold text-white mb-2">Check your email</h2>
+              <p className="text-white/40 text-sm mb-4">
+                We sent a magic link to <strong className="text-white">{email}</strong>
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-white/30">
                 Click the link in your email to sign in. No password needed.
               </p>
               <button
                 onClick={() => setSent(false)}
-                className="mt-6 text-sm text-primary hover:underline"
+                className="mt-6 text-sm text-white/40 hover:text-white transition-colors"
               >
                 Use a different email
               </button>
@@ -79,7 +79,7 @@ export default function LoginPage() {
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label htmlFor="email" className="block text-sm font-medium mb-2">
+                <label htmlFor="email" className="block text-sm font-medium text-white/70 mb-2">
                   Email address
                 </label>
                 <input
@@ -89,18 +89,18 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   required
-                  className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+                  className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-full text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/20 transition"
                 />
               </div>
 
               {error && (
-                <p className="text-sm text-danger">{error}</p>
+                <p className="text-sm text-red-400">{error}</p>
               )}
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 bg-primary hover:bg-accent text-white rounded-xl font-medium transition flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full py-3 bg-white hover:bg-white/90 text-black rounded-full font-medium transition flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {loading ? (
                   <>
@@ -115,7 +115,7 @@ export default function LoginPage() {
                 )}
               </button>
 
-              <p className="text-xs text-center text-muted-foreground">
+              <p className="text-xs text-center text-white/30">
                 No password needed. We&apos;ll send you a secure link to sign in.
               </p>
             </form>

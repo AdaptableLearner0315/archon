@@ -49,6 +49,16 @@ interface AppState {
   cycleEvents: CycleStreamEvent[];
   addCycleEvent: (event: CycleStreamEvent) => void;
   clearCycleEvents: () => void;
+
+  // Team Task State
+  activeTeamTask: {
+    id: string;
+    description: string;
+    agents: AgentRole[];
+    status: 'running' | 'merging' | 'completed';
+  } | null;
+  setActiveTeamTask: (task: AppState['activeTeamTask']) => void;
+  clearActiveTeamTask: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -117,4 +127,9 @@ export const useAppStore = create<AppState>((set) => ({
       cycleEvents: [...state.cycleEvents, event].slice(-500),
     })),
   clearCycleEvents: () => set({ cycleEvents: [] }),
+
+  // Team Task State
+  activeTeamTask: null,
+  setActiveTeamTask: (task) => set({ activeTeamTask: task }),
+  clearActiveTeamTask: () => set({ activeTeamTask: null }),
 }));

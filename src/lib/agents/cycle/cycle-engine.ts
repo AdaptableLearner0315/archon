@@ -9,10 +9,23 @@ import { LongTermMemoryStore } from '../memory/long-term';
 import { ContextBuilder } from '../memory/context-builder';
 import { MessageBus } from '../message-bus';
 import type { TaskRunnerDeps } from './task-runner';
+import { sendDigest } from '../notifications/digest';
+import { runReflection, getLatestReflection, runUserJourneyReview } from '../reflection';
+import { registerGoalsForCycle, detectConflicts, calculateAlignmentScore } from '../alignment';
+import { generateCycleSummary } from './cycle-summary';
 import { v4 as uuid } from 'uuid';
 
 // In-memory concurrency lock
 const activeCycles = new Map<string, string>(); // companyId → cycleId
+
+// Check if we should run a weekly reflection (once per week)
+async function shouldRunWeeklyReflection(companyId: string, supabase: SupabaseClient): Promise<boolean> {
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const latestReflection = await getLatestReflection(companyId, supabase, 'weekly');
+
+  if (!latestReflection) return true;
+  return latestReflection.createdAt < oneWeekAgo;
+}
 
 export async function startCycle(
   companyId: string,
@@ -118,6 +131,47 @@ Plan: ${company.plan}
       .update({ plan: plan as unknown as Record<string, unknown> })
       .eq('id', cycleId);
 
+    // --- ALIGNMENT CHECK ---
+    let alignmentScore = 100;
+    try {
+      onEvent({
+        type: 'cycle_status',
+        cycleId,
+        status: 'planning',
+        content: 'Registering agent goals and checking alignment...',
+        timestamp: new Date().toISOString(),
+      });
+
+      const goals = await registerGoalsForCycle(cycleId, companyId, plan, supabase);
+      const conflicts = await detectConflicts(goals, cycleId, companyId, supabase);
+      const alignmentReport = await calculateAlignmentScore(
+        goals,
+        plan.directive,
+        cycleId,
+        companyId,
+        conflicts,
+        supabase
+      );
+
+      alignmentScore = alignmentReport.overallScore;
+
+      // Log high/critical unresolved conflicts
+      const criticalConflicts = conflicts.filter(
+        (c) => (c.severity === 'high' || c.severity === 'critical') && !c.resolvedAt
+      );
+      if (criticalConflicts.length > 0) {
+        onEvent({
+          type: 'cycle_status',
+          cycleId,
+          status: 'planning',
+          content: `Warning: ${criticalConflicts.length} critical conflict(s) detected. Review recommended.`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (alignErr) {
+      console.error('Alignment check failed:', alignErr);
+    }
+
     // --- EXECUTING ---
     await updateCycleStatus(cycleId, 'executing', supabase);
     cycle.status = 'executing';
@@ -150,6 +204,62 @@ Plan: ${company.plan}
       }
     }
 
+    // --- CYCLE SUMMARY ---
+    try {
+      onEvent({
+        type: 'cycle_status',
+        cycleId,
+        status: 'completing',
+        content: 'Generating cycle summary...',
+        timestamp: new Date().toISOString(),
+      });
+
+      await generateCycleSummary(
+        cycleId,
+        companyId,
+        plan,
+        tasks,
+        alignmentScore,
+        supabase
+      );
+    } catch (summaryErr) {
+      console.error('Failed to generate cycle summary:', summaryErr);
+    }
+
+    // --- REFLECTION (weekly) ---
+    try {
+      const shouldReflect = await shouldRunWeeklyReflection(companyId, supabase);
+      if (shouldReflect) {
+        onEvent({
+          type: 'cycle_status',
+          cycleId,
+          status: 'completing',
+          content: 'Running weekly reflection analysis...',
+          timestamp: new Date().toISOString(),
+        });
+        await runReflection(companyId, supabase, { cycleId, period: 'weekly' });
+      }
+    } catch (reflectionErr) {
+      console.error('Failed to run reflection:', reflectionErr);
+      // Non-blocking - continue to notification
+    }
+
+    // --- USER JOURNEY REVIEW (bi-weekly) ---
+    try {
+      const journeyReview = await runUserJourneyReview(companyId, supabase);
+      if (journeyReview) {
+        onEvent({
+          type: 'cycle_status',
+          cycleId,
+          status: 'completing',
+          content: `Bi-weekly user journey review completed. Experience score: ${journeyReview.experienceScore}/100`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (journeyErr) {
+      console.error('Failed to run user journey review:', journeyErr);
+    }
+
     // --- NOTIFYING ---
     await updateCycleStatus(cycleId, 'notifying', supabase);
     cycle.status = 'notifying';
@@ -161,6 +271,13 @@ Plan: ${company.plan}
       content: 'Cycle complete. Generating notifications...',
       timestamp: new Date().toISOString(),
     });
+
+    // Send digest (email, WhatsApp, Slack, webapp) with frequency gating
+    try {
+      await sendDigest(cycleId, companyId, supabase);
+    } catch (digestErr) {
+      console.error('Failed to send digest:', digestErr);
+    }
 
     // --- DONE ---
     const completedAt = new Date().toISOString();

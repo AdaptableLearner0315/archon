@@ -12,6 +12,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { useState } from 'react';
+import NotificationBell from './NotificationBell';
 
 interface DashboardNavProps {
   companyName: string;
@@ -46,7 +47,7 @@ export default function DashboardNav({
       <div className="h-full px-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center">
               <Zap className="w-4 h-4 text-white" />
             </div>
             <span className="font-bold text-sm">Archon</span>
@@ -69,15 +70,17 @@ export default function DashboardNav({
 
           <button
             onClick={onToggleSidebar}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition ${
               sidebarOpen
-                ? 'bg-primary text-white'
-                : 'text-muted-foreground hover:text-foreground border border-border'
+                ? 'bg-white/15 text-white border-white/30'
+                : 'text-muted-foreground hover:text-foreground border-border'
             }`}
           >
             <MessageSquare className="w-3.5 h-3.5" />
             Command Center
           </button>
+
+          <NotificationBell />
 
           <div className="relative">
             <button
@@ -91,6 +94,14 @@ export default function DashboardNav({
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
                 <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-lg z-50 py-1">
+                  <Link
+                    href="/dashboard/settings"
+                    onClick={() => setMenuOpen(false)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Notifications
+                  </Link>
                   <button
                     onClick={handleBilling}
                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition"
