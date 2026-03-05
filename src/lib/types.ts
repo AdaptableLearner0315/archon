@@ -171,7 +171,73 @@ export interface MemoryContext {
   workingMemory: WorkingMemoryEntry[];
   shortTermMemories: ShortTermMemory[];
   longTermMemories: LongTermMemory[];
+  companyMemories?: CompanyMemory[];
   tokenEstimate: number;
+}
+
+// --- Cognitive Memory Types (Company-Wide) ---
+export type MemoryDomain = 'business_context' | 'competitors' | 'market' | 'agents';
+export type MemorySource = 'onboarding' | 'agent' | 'user' | 'consolidation' | 'inference';
+
+export interface CompanyMemory {
+  id: string;
+  companyId: string;
+  domain: MemoryDomain;
+  scope: string; // Hierarchical path: "/business/target_audience"
+  topic: string;
+  content: string;
+  importance: number; // 0-1
+  confidence: number; // 0-1
+  halfLifeDays: number;
+  source: MemorySource;
+  sourceAgent: string | null;
+  sourceCycleId: string | null;
+  supersedes: string | null;
+  supersededBy: string | null;
+  timesAccessed: number;
+  lastAccessedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  // Advanced cognitive features
+  embedding?: number[]; // 1536-dimensional vector for semantic search
+  reinforcementCount?: number; // How many sources confirmed this fact
+  expiresAt: string | null;
+  isArchived: boolean;
+}
+
+export interface CompanyMemoryInput {
+  companyId: string;
+  domain: MemoryDomain;
+  scope: string;
+  topic: string;
+  content: string;
+  importance?: number;
+  confidence?: number;
+  halfLifeDays?: number;
+  source?: MemorySource;
+  sourceAgent?: string;
+  sourceCycleId?: string;
+}
+
+export interface MemoryRecallOptions {
+  companyId: string;
+  domain?: MemoryDomain;
+  scope?: string; // Prefix match
+  query?: string; // Topic/content search
+  limit?: number;
+  minImportance?: number;
+  minConfidence?: number;
+  includeArchived?: boolean;
+  // Scoring weights
+  weightImportance?: number;
+  weightConfidence?: number;
+  weightRecency?: number;
+  weightFrequency?: number;
+}
+
+export interface MemoryRecallResult {
+  memory: CompanyMemory;
+  score: number;
 }
 
 // --- Self-Improvement Types ---
@@ -751,3 +817,156 @@ export interface TeamTask {
 }
 
 // Note: Team task event types are now integrated directly into CycleStreamEvent
+
+// ============================================================
+// Advanced Cognitive Memory Types
+// ============================================================
+
+// --- Memory Association Types ---
+export type MemoryAssociationType =
+  | 'supports'      // A supports/confirms B
+  | 'contradicts'   // A contradicts B (trigger resolution)
+  | 'elaborates'    // A adds detail to B
+  | 'derives_from'  // A was inferred from B
+  | 'related_to';   // General semantic relation
+
+export interface MemoryAssociation {
+  id: string;
+  companyId: string;
+  memoryAId: string;
+  memoryBId: string;
+  relationshipType: MemoryAssociationType;
+  strength: number; // 0-1
+  createdAt: string;
+  createdBy: string | null; // 'system' | 'user' | agent role
+}
+
+// --- Memory Usage Tracking ---
+export interface MemoryUsageLog {
+  id: string;
+  memoryId: string;
+  companyId: string;
+  cycleId: string | null;
+  usedByAgent: AgentRole;
+  taskContext: string | null;
+  wasHelpful: boolean | null;
+  relevanceScore: number | null;
+  createdAt: string;
+}
+
+// --- Memory Recall Configuration (Per-Company Adaptive Weights) ---
+export interface MemoryRecallConfig {
+  id: string;
+  companyId: string;
+  // Base weights (must sum to ~1.0)
+  weightSemantic: number;
+  weightImportance: number;
+  weightConfidence: number;
+  weightRecency: number;
+  weightFrequency: number;
+  // Domain-specific boosts
+  domainBoosts: Record<MemoryDomain, number>;
+  // Agent-domain affinities learned over time
+  agentDomainAffinities: Record<AgentRole, Record<MemoryDomain, number>>;
+  // Decay adjustments by domain (in days)
+  domainHalfLifeOverrides: Partial<Record<MemoryDomain, number>>;
+  // Version tracking
+  version: number;
+  updatedAt: string;
+}
+
+// --- Memory Lessons (Strategy Learnings) ---
+export type MemoryLessonStatus = 'proposed' | 'validating' | 'active' | 'deprecated';
+export type MemoryStrategyType = 'weight_adjustment' | 'decay_adjustment' | 'attention_bias' | 'domain_priority';
+
+export interface MemoryLesson {
+  id: string;
+  companyId: string;
+  lesson: string;
+  evidence: { period: string; metric: string; value: number }[];
+  strategyType: MemoryStrategyType;
+  strategyBefore: Record<string, unknown>;
+  strategyAfter: Record<string, unknown>;
+  status: MemoryLessonStatus;
+  validationCycles: number;
+  requiredCycles: number;
+  performanceBefore: number | null;
+  performanceAfter: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- Memory Reflection Output ---
+export interface MemoryReflectionOutput {
+  id: string;
+  companyId: string;
+  period: 'daily' | 'weekly';
+  metrics: {
+    totalRecalls: number;
+    helpfulRecalls: number;
+    unhelpfulRecalls: number;
+    recallAccuracy: number;
+    avgRelevanceScore: number;
+    byDomain: Record<MemoryDomain, {
+      recalls: number;
+      accuracy: number;
+      topPerformingMemories: string[];
+      underperformingMemories: string[];
+    }>;
+    byAgent: Record<AgentRole, {
+      recalls: number;
+      mostUsedDomains: MemoryDomain[];
+      avgRelevance: number;
+    }>;
+  };
+  insights: string[];
+  recommendations: MemoryRecommendation[];
+  suggestedWeightChanges: {
+    currentWeights: Partial<MemoryRecallConfig>;
+    suggestedWeights: Partial<MemoryRecallConfig>;
+    rationale: string;
+  } | null;
+  overallHealthScore: number;
+  createdAt: string;
+}
+
+export interface MemoryRecommendation {
+  id: string;
+  type: 'boost' | 'archive' | 'consolidate' | 'decay_adjust' | 'weight_change';
+  memoryIds?: string[];
+  description: string;
+  impact: 'high' | 'medium' | 'low';
+  autoApply: boolean;
+}
+
+// --- Contradiction Detection ---
+export type ContradictionType = 'factual' | 'temporal' | 'strategic';
+export type ContradictionResolution = 'keep_newer' | 'keep_more_important' | 'merge' | 'ask_user';
+
+export interface Contradiction {
+  id: string;
+  companyId: string;
+  memoryA: CompanyMemory;
+  memoryB: CompanyMemory;
+  conflictType: ContradictionType;
+  suggestedResolution: ContradictionResolution;
+  resolved: boolean;
+  resolvedAt: string | null;
+  resolvedBy: 'system' | 'user' | null;
+  createdAt: string;
+}
+
+// --- Attention Mechanism Context ---
+export interface AttentionContext {
+  task: string;
+  agentRole: AgentRole;
+  recentActivities: string[];
+  tokenBudget?: number;
+}
+
+// --- Semantic Recall Options ---
+export interface SemanticRecallOptions extends MemoryRecallOptions {
+  queryEmbedding?: number[];
+  semanticThreshold?: number;
+  useSemanticSearch?: boolean;
+}

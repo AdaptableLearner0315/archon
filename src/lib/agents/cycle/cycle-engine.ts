@@ -13,6 +13,8 @@ import { sendDigest } from '../notifications/digest';
 import { runReflection, getLatestReflection, runUserJourneyReview } from '../reflection';
 import { registerGoalsForCycle, detectConflicts, calculateAlignmentScore } from '../alignment';
 import { generateCycleSummary } from './cycle-summary';
+import { CognitiveMemoryStore } from '../../memory/store';
+import { runMemoryReflection, extractMemoryLessons, applyActiveLessons } from '../../memory/reflection';
 import { v4 as uuid } from 'uuid';
 
 // In-memory concurrency lock
@@ -96,7 +98,7 @@ Plan: ${company.plan}
   const workingMemory = new WorkingMemory(cycleId);
   const stmStore = new ShortTermMemoryStore(supabase);
   const ltmStore = new LongTermMemoryStore(supabase);
-  const contextBuilder = new ContextBuilder(workingMemory, stmStore, ltmStore);
+  const contextBuilder = new ContextBuilder(workingMemory, stmStore, ltmStore, supabase);
   const messageBus = new MessageBus(cycleId, companyId, supabase);
 
   const cycle: OperatingCycle = {
@@ -224,6 +226,57 @@ Plan: ${company.plan}
       );
     } catch (summaryErr) {
       console.error('Failed to generate cycle summary:', summaryErr);
+    }
+
+    // --- COGNITIVE MEMORY EXTRACTION ---
+    try {
+      const cognitiveStore = new CognitiveMemoryStore(supabase);
+
+      // Extract memories from completed task results
+      for (const task of tasks.filter((t) => t.status === 'completed' && t.result)) {
+        const extracted = await cognitiveStore.extract(companyId, task.result!, {
+          sourceAgent: task.agentRole,
+          sourceCycleId: cycleId,
+        });
+
+        if (extracted.length > 0) {
+          // Log usage for analytics
+          await cognitiveStore.logBatchMemoryUsage(
+            extracted.map((m) => m.id),
+            companyId,
+            {
+              usedByAgent: task.agentRole,
+              cycleId,
+              taskContext: task.description,
+            }
+          );
+        }
+      }
+
+      // Run memory reflection if enough data
+      const memoryReflection = await runMemoryReflection(supabase, companyId, {
+        period: 'daily',
+        cycleId,
+      });
+
+      // Extract lessons if we have meaningful data
+      if (memoryReflection.metrics.totalRecalls >= 10) {
+        await extractMemoryLessons(supabase, memoryReflection);
+      }
+
+      // Apply active memory lessons to recall config
+      await applyActiveLessons(supabase, companyId);
+
+      onEvent({
+        type: 'cycle_status',
+        cycleId,
+        status: 'completing',
+        content: `Memory extraction complete. Learned ${tasks.filter((t) => t.result).length} facts.`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (memoryErr) {
+      console.error('Failed to run memory extraction:', memoryErr);
+      // Non-blocking - continue with other completion tasks
     }
 
     // --- REFLECTION (weekly) ---

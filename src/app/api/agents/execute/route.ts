@@ -87,7 +87,7 @@ Plan: ${company.plan}
             const workingMemory = new WorkingMemory(cycle.id);
             const shortTermStore = new ShortTermMemoryStore(supabase);
             const longTermStore = new LongTermMemoryStore(supabase);
-            const contextBuilder = new ContextBuilder(workingMemory, shortTermStore, longTermStore);
+            const contextBuilder = new ContextBuilder(workingMemory, shortTermStore, longTermStore, supabase);
 
             const deps = {
               supabase,

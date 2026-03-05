@@ -16,6 +16,7 @@ import CommandCenter from '@/components/command-center/CommandCenter';
 import DashboardNav from '@/components/dashboard/DashboardNav';
 import { ProfileIncompleteNotification } from '@/components/dashboard/ProfileIncompleteNotification';
 import { InfrastructureBuildingStatus } from '@/components/dashboard/InfrastructureBuildingStatus';
+import { MemoryStatus } from '@/components/dashboard/MemoryStatus';
 import { Celebration } from '@/components/ui/Celebration';
 import { useMilestones } from '@/lib/hooks/useMilestones';
 
@@ -334,6 +335,11 @@ export default function DashboardPage() {
           {/* Compact Metrics Row */}
           <div className="mt-6">
             <MetricsRow />
+          </div>
+
+          {/* Memory Status Card */}
+          <div className="mt-4">
+            <MemoryStatus companyId={company.id as string} />
           </div>
 
           {/* Priority Items + Mission Control */}

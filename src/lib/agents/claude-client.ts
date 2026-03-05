@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AgentRole } from '../types';
 
 // --- Model routing ---
-type UseCase = 'command_center' | 'ceo_planning' | 'agent_task' | 'inter_agent' | 'retrospective' | 'memory_condensation' | 'reflection';
+type UseCase = 'command_center' | 'ceo_planning' | 'agent_task' | 'inter_agent' | 'retrospective' | 'memory_condensation' | 'memory_extraction' | 'memory_consolidation' | 'reflection';
 
 interface ModelConfig {
   model: string;
@@ -18,6 +18,8 @@ const MODEL_ROUTING: Record<UseCase, ModelConfig> = {
   inter_agent: { model: 'claude-sonnet-4-20250514', maxTokens: 2048, extendedThinking: false, thinkingBudget: 0 },
   retrospective: { model: 'claude-opus-4-6-20250616', maxTokens: 4096, extendedThinking: true, thinkingBudget: 2048 },
   memory_condensation: { model: 'claude-sonnet-4-20250514', maxTokens: 1024, extendedThinking: false, thinkingBudget: 0 },
+  memory_extraction: { model: 'claude-sonnet-4-20250514', maxTokens: 2048, extendedThinking: false, thinkingBudget: 0 },
+  memory_consolidation: { model: 'claude-sonnet-4-20250514', maxTokens: 1024, extendedThinking: false, thinkingBudget: 0 },
   reflection: { model: 'claude-opus-4-6-20250616', maxTokens: 4096, extendedThinking: true, thinkingBudget: 2048 },
 };
 

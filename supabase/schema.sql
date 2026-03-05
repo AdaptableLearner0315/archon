@@ -233,6 +233,30 @@ create table if not exists agent_memory_long_term (
   created_at timestamptz default now()
 );
 
+-- Company-wide cognitive memory (shared across all agents)
+create table if not exists company_memories (
+  id uuid default gen_random_uuid() primary key,
+  company_id uuid references companies(id) on delete cascade not null,
+  domain text not null check (domain in ('business_context', 'competitors', 'market', 'agents')),
+  scope text not null,
+  topic text not null,
+  content text not null,
+  importance numeric default 0.5 check (importance >= 0 and importance <= 1),
+  confidence numeric default 0.8 check (confidence >= 0 and confidence <= 1),
+  half_life_days integer default 30,
+  source text default 'onboarding' check (source in ('onboarding', 'agent', 'user', 'consolidation')),
+  source_agent text,
+  source_cycle_id uuid references operating_cycles(id) on delete set null,
+  supersedes uuid references company_memories(id) on delete set null,
+  superseded_by uuid references company_memories(id) on delete set null,
+  times_accessed integer default 0,
+  last_accessed_at timestamptz default now(),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  expires_at timestamptz,
+  is_archived boolean default false
+);
+
 -- Agent performance tracking
 create table if not exists agent_performance (
   id uuid default gen_random_uuid() primary key,
@@ -286,6 +310,7 @@ alter table cycle_tasks enable row level security;
 alter table agent_messages enable row level security;
 alter table agent_memory_short_term enable row level security;
 alter table agent_memory_long_term enable row level security;
+alter table company_memories enable row level security;
 alter table agent_performance enable row level security;
 alter table prompt_versions enable row level security;
 alter table notification_preferences enable row level security;
@@ -338,6 +363,18 @@ create policy "Update own long term memory" on agent_memory_long_term
 create policy "Delete own long term memory" on agent_memory_long_term
   for delete using (company_id in (select id from companies where user_id = auth.uid()));
 create policy "Service role bypass long term memory" on agent_memory_long_term
+  for all using (auth.role() = 'service_role');
+
+-- Company memories (cognitive memory) policies
+create policy "View own company memories" on company_memories
+  for select using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Insert own company memories" on company_memories
+  for insert with check (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Update own company memories" on company_memories
+  for update using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Delete own company memories" on company_memories
+  for delete using (company_id in (select id from companies where user_id = auth.uid()));
+create policy "Service role bypass company memories" on company_memories
   for all using (auth.role() = 'service_role');
 
 -- Agent performance policies
@@ -428,6 +465,11 @@ create index idx_stm_topic on agent_memory_short_term(company_id, topic);
 create index idx_stm_expires on agent_memory_short_term(expires_at);
 create index idx_ltm_agent on agent_memory_long_term(company_id, agent_role, category);
 create index idx_ltm_referenced on agent_memory_long_term(company_id, last_referenced_at desc);
+create index idx_company_memories_domain on company_memories(company_id, domain);
+create index idx_company_memories_scope on company_memories(company_id, scope);
+create index idx_company_memories_importance on company_memories(company_id, importance desc);
+create index idx_company_memories_accessed on company_memories(company_id, last_accessed_at desc);
+create index idx_company_memories_active on company_memories(company_id) where is_archived = false and (expires_at is null or expires_at > now());
 create index idx_performance_agent on agent_performance(company_id, agent_role, created_at desc);
 create index idx_performance_cycle on agent_performance(cycle_id);
 create index idx_prompt_versions_active on prompt_versions(company_id, agent_role, is_active);

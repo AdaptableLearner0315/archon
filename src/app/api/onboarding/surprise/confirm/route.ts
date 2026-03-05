@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createCreditManager } from '@/lib/credits/manager';
 import { sendWelcomeEmail } from '@/lib/agents/notifications/welcome';
+import { seedMemoriesFromSurprise } from '@/lib/memory/seed';
 
 interface SurpriseConcept {
   companyName: string;
@@ -114,14 +115,18 @@ export async function POST(request: NextRequest) {
       skipped: true,
     });
 
-    // Store profile in long-term memory
-    await supabase.from('agent_memory_long_term').insert({
-      company_id: company.id,
-      agent_role: 'ceo',
-      category: 'company_knowledge',
-      summary: `Business: ${concept.businessDescription}. Target: ${concept.targetAudience.primary}. Stage: idea. Generated via Surprise Me.`,
-      confidence: 0.95,
+    // Seed cognitive memories from the generated concept
+    const seedResult = await seedMemoriesFromSurprise(supabase, company.id, {
+      name: concept.companyName,
+      description: concept.businessDescription,
+      businessType: concept.businessType,
+      targetAudience: concept.targetAudience.primary,
+      competitors: concept.competitors,
+      keyFeatures: concept.keyFeatures,
+      uniqueValueProp: concept.uniqueValueProp,
+      brandTone: concept.brandTone,
     });
+    console.log(`[Surprise] Seeded ${seedResult.total} cognitive memories for company ${company.id}`);
 
     // Create initial metrics
     await supabase.from('metrics').insert({

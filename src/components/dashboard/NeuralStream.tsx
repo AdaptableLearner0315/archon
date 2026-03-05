@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import { AGENTS, type AgentActivity } from '@/lib/types';
 
@@ -109,7 +109,10 @@ export default function NeuralStream({ className = '' }: NeuralStreamProps) {
   const prevCountRef = useRef(0);
 
   // Get recent activities (last 8)
-  const recentActivities = activities.slice(0, 8).reverse();
+  const recentActivities = useMemo(
+    () => activities.slice(0, 8).reverse(),
+    [activities]
+  );
 
   // Auto-scroll to bottom when new activities arrive
   useEffect(() => {
@@ -120,25 +123,21 @@ export default function NeuralStream({ className = '' }: NeuralStreamProps) {
 
   // Track which activity is new for typing animation
   useEffect(() => {
-    const prevCount = prevCountRef.current;
-    const newCount = recentActivities.length;
-
-    if (newCount > prevCount) {
-      setDisplayedActivities(recentActivities);
-    } else {
-      setDisplayedActivities(recentActivities);
-    }
-
-    prevCountRef.current = newCount;
+    setDisplayedActivities(recentActivities);
+    prevCountRef.current = recentActivities.length;
   }, [recentActivities]);
 
   // Count active agents
-  const activeCount = agents.filter((a) => a.status === 'working').length;
+  const activeCount = useMemo(
+    () => agents.filter((a) => a.status === 'working').length,
+    [agents]
+  );
 
   // Get working agent roles
-  const workingRoles = agents
-    .filter((a) => a.status === 'working')
-    .map((a) => a.role);
+  const workingRoles = useMemo(
+    () => agents.filter((a) => a.status === 'working').map((a) => a.role),
+    [agents]
+  );
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
