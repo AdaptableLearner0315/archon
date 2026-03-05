@@ -4,6 +4,7 @@ import { createCreditManager } from '@/lib/credits/manager';
 import { sendWelcomeEmail } from '@/lib/agents/notifications/welcome';
 import { generateCompanyName } from '@/lib/onboarding/name-generator';
 import { ATLAS_EXTRACTION_PROMPT } from '@/lib/onboarding/atlas-prompt';
+import { seedMemoriesFromOnboarding } from '@/lib/memory/seed';
 import Anthropic from '@anthropic-ai/sdk';
 import Stripe from 'stripe';
 
@@ -120,14 +121,9 @@ export async function POST(request: NextRequest) {
       conversation_log: conversationHistory,
     });
 
-    // Store profile in long-term memory for all agents
-    await supabase.from('agent_memory_long_term').insert({
-      company_id: company.id,
-      agent_role: 'ceo',
-      category: 'company_knowledge',
-      summary: `Business: ${profile.businessIdea}. Target: ${profile.targetAudience?.primary || 'Not specified'}. Stage: ${profile.stage || 'idea'}. Founder skills: ${profile.founderSkills?.join(', ') || 'Not specified'}. Working style: ${profile.workingStyle || 'balanced'}.`,
-      confidence: 0.95,
-    });
+    // Seed cognitive memories from onboarding profile (replaces old single long-term memory)
+    const seedResult = await seedMemoriesFromOnboarding(supabase, company.id, profile);
+    console.log(`[Onboarding] Seeded ${seedResult.total} cognitive memories for company ${company.id}`);
 
     // Create initial metrics
     await supabase.from('metrics').insert({

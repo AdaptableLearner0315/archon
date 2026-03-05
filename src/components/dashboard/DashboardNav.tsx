@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   CreditCard,
+  Brain,
 } from 'lucide-react';
 import { useState } from 'react';
 import NotificationBell from './NotificationBell';
@@ -66,6 +67,14 @@ export default function DashboardNav({
           >
             <ExternalLink className="w-3.5 h-3.5" />
             Public Dashboard
+          </Link>
+
+          <Link
+            href="/dashboard/memory"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg transition"
+          >
+            <Brain className="w-3.5 h-3.5" />
+            Memory
           </Link>
 
           <button
