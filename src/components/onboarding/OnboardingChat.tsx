@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation';
 import { ChatMessage, TypingIndicator } from './ChatMessage';
 import { VoiceButton } from './VoiceButton';
 import { InfrastructureProgress } from './InfrastructureProgress';
+import { ProfileReview, ExtractedProfile } from './ProfileReview';
+import { MemoryBubbles, MemoryInsight } from './MemoryBubble';
 import type { ConversationPhase } from '@/lib/onboarding/conversation-engine';
 
 const CONVERSATION_STORAGE_KEY = 'archon_onboarding_conversation';
@@ -75,6 +77,86 @@ function ConceptReveal({
   onReroll: () => void;
   isLoading: boolean;
 }) {
+  const [step, setStep] = useState<'reveal' | 'validate'>('reveal');
+  const [validated, setValidated] = useState(false);
+
+  const handleProceedToValidate = () => {
+    setStep('validate');
+  };
+
+  const handleValidateAndConfirm = () => {
+    setValidated(true);
+    onConfirm();
+  };
+
+  // Validation step - quick confirmation of key details
+  if (step === 'validate') {
+    return (
+      <div className="flex flex-col h-full p-6">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md mx-auto w-full"
+        >
+          <h2 className="text-xl font-semibold text-white mb-6">Quick check before we begin</h2>
+
+          <div className="space-y-4 mb-8">
+            <div className="p-4 bg-white/[0.04] border border-white/[0.08] rounded-xl">
+              <p className="text-xs text-white/40 uppercase tracking-wider mb-1">Business Type</p>
+              <p className="text-white">{concept.businessType}</p>
+            </div>
+
+            <div className="p-4 bg-white/[0.04] border border-white/[0.08] rounded-xl">
+              <p className="text-xs text-white/40 uppercase tracking-wider mb-1">Target Audience</p>
+              <p className="text-white">{concept.targetAudience.primary}</p>
+            </div>
+
+            {concept.targetAudience.painPoints && concept.targetAudience.painPoints.length > 0 && (
+              <div className="p-4 bg-white/[0.04] border border-white/[0.08] rounded-xl">
+                <p className="text-xs text-white/40 uppercase tracking-wider mb-1">Problems We&apos;ll Solve</p>
+                <ul className="text-white/80 text-sm space-y-1">
+                  {concept.targetAudience.painPoints.slice(0, 2).map((point, i) => (
+                    <li key={i}>• {point}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <p className="text-sm text-white/50 mb-6 text-center">
+            Does this sound like something you&apos;d want to build?
+          </p>
+
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={handleValidateAndConfirm}
+              disabled={isLoading}
+              className="w-full py-3 bg-white text-black font-semibold rounded-xl hover:bg-white/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Creating your AI team...
+                </>
+              ) : (
+                "Yes, let's build this!"
+              )}
+            </button>
+
+            <button
+              onClick={() => setStep('reveal')}
+              disabled={isLoading}
+              className="w-full py-2.5 text-white/60 text-sm hover:text-white/80 transition-colors disabled:opacity-50"
+            >
+              Go back
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Initial reveal step
   return (
     <div className="flex flex-col items-center justify-center h-full p-6 text-center">
       <motion.div
@@ -117,18 +199,11 @@ function ConceptReveal({
           className="flex items-center justify-center gap-3"
         >
           <button
-            onClick={onConfirm}
+            onClick={handleProceedToValidate}
             disabled={isLoading}
             className="px-8 py-3 bg-white text-black font-semibold rounded-xl hover:bg-white/90 transition-colors disabled:opacity-50"
           >
-            {isLoading ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Creating...
-              </span>
-            ) : (
-              "Love it, let's build!"
-            )}
+            Love it, let&apos;s build!
           </button>
 
           {rerollCount < MAX_REROLLS && (
@@ -220,6 +295,18 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
   const [rerollCount, setRerollCount] = useState(0);
   const [completionProfileData, setCompletionProfileData] = useState<Record<string, unknown> | null>(null);
 
+  // Profile Review state
+  const [showProfileReview, setShowProfileReview] = useState(false);
+  const [extractedProfile, setExtractedProfile] = useState<ExtractedProfile | null>(null);
+  const [isExtractingProfile, setIsExtractingProfile] = useState(false);
+  const [isConfirmingProfile, setIsConfirmingProfile] = useState(false);
+
+  // Memory feedback state
+  const [capturedInsights, setCapturedInsights] = useState<MemoryInsight[]>([]);
+
+  // Session recovery toast state
+  const [showSessionRecoveryToast, setShowSessionRecoveryToast] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const completionCalledRef = useRef(false);
@@ -257,6 +344,9 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
             setMessages(storedMessages);
             setCurrentPhase(phase);
             setProgress(storedProgress || 0);
+            // Show session recovery toast
+            setShowSessionRecoveryToast(true);
+            setTimeout(() => setShowSessionRecoveryToast(false), 4000);
             return;
           }
         }
@@ -382,6 +472,47 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
     router.push('/dashboard');
   };
 
+  const handleProfileConfirm = async (editedProfile: ExtractedProfile) => {
+    setIsConfirmingProfile(true);
+
+    try {
+      const completeResponse = await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationHistory: messages.map((m) => ({
+            role: m.role === 'atlas' ? 'assistant' : 'user',
+            content: m.content,
+          })),
+          selectedPackage: null,
+          // Pass the edited profile to be used directly
+          editedProfile,
+        }),
+      });
+
+      if (completeResponse.ok) {
+        const data = await completeResponse.json();
+        sessionStorage.removeItem(CONVERSATION_STORAGE_KEY);
+        setCompanyId(data.companyId);
+        setCompletionProfileData(data.profile || editedProfile);
+        setShowProfileReview(false);
+        setShowInfrastructureProgress(true);
+      } else {
+        console.error('Failed to complete onboarding:', await completeResponse.text());
+        setIsConfirmingProfile(false);
+      }
+    } catch (err) {
+      console.error('Error completing onboarding:', err);
+      setIsConfirmingProfile(false);
+    }
+  };
+
+  const handleProfileBack = () => {
+    setShowProfileReview(false);
+    setIsComplete(false);
+    completionCalledRef.current = false;
+  };
+
   const handleSend = useCallback(async () => {
     const text = inputValue.trim() || interimTranscript.trim();
     if (!text || isLoading || isStreaming || isComplete) return;
@@ -470,6 +601,9 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
                 newPhase = parsed.phase;
               } else if (parsed.type === 'complete') {
                 completionProfile = parsed.profile;
+              } else if (parsed.type === 'insights') {
+                // Update captured insights for memory feedback UI
+                setCapturedInsights(parsed.insights || []);
               }
             } catch {
               // Ignore parse errors
@@ -496,9 +630,11 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
       if (completionProfile && !completionCalledRef.current) {
         completionCalledRef.current = true;
         setIsComplete(true);
+        setIsExtractingProfile(true);
 
+        // Extract profile for review instead of completing directly
         try {
-          const completeResponse = await fetch('/api/onboarding/complete', {
+          const extractResponse = await fetch('/api/onboarding/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -506,26 +642,24 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
                 role: m.role === 'atlas' ? 'assistant' : 'user',
                 content: m.content,
               })),
-              selectedPackage: null,
             }),
           });
 
-          if (completeResponse.ok) {
-            const data = await completeResponse.json();
-            sessionStorage.removeItem(CONVERSATION_STORAGE_KEY);
-            setCompanyId(data.companyId);
-            setCompletionProfileData(data.profile || completionProfile);
-            setShowInfrastructureProgress(true);
-            // Navigation handled by InfrastructureProgress onComplete/onError
+          if (extractResponse.ok) {
+            const data = await extractResponse.json();
+            setExtractedProfile(data.profile);
+            setShowProfileReview(true);
           } else {
-            console.error('Failed to complete onboarding:', await completeResponse.text());
+            console.error('Failed to extract profile:', await extractResponse.text());
             completionCalledRef.current = false;
             setIsComplete(false);
           }
         } catch (err) {
-          console.error('Error completing onboarding:', err);
+          console.error('Error extracting profile:', err);
           completionCalledRef.current = false;
           setIsComplete(false);
+        } finally {
+          setIsExtractingProfile(false);
         }
       }
     } catch (error) {
@@ -550,6 +684,32 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
     setInterimTranscript('');
   }, []);
 
+  // Show profile extraction loading
+  if (isExtractingProfile) {
+    return (
+      <div className="flex flex-col h-full max-h-[calc(100vh-8rem)] items-center justify-center p-6">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+          className="w-12 h-12 rounded-full border-2 border-white/10 border-t-white mb-6"
+        />
+        <p className="text-white/50 text-sm">Analyzing your conversation...</p>
+      </div>
+    );
+  }
+
+  // Show profile review
+  if (showProfileReview && extractedProfile) {
+    return (
+      <ProfileReview
+        profile={extractedProfile}
+        onConfirm={handleProfileConfirm}
+        onBack={handleProfileBack}
+        isLoading={isConfirmingProfile}
+      />
+    );
+  }
+
   // Show infrastructure progress
   if (showInfrastructureProgress && companyId) {
     return (
@@ -562,6 +722,10 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
           }}
           onError={(error) => {
             console.error('Infrastructure generation error:', error);
+            onComplete(completionProfileData || {});
+          }}
+          onSkip={() => {
+            // Skip infrastructure generation and go directly to dashboard
             onComplete(completionProfileData || {});
           }}
         />
@@ -595,8 +759,31 @@ export function OnboardingChat({ onComplete }: OnboardingChatProps) {
 
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-8rem)]">
+      {/* Session recovery toast */}
+      <AnimatePresence>
+        {showSessionRecoveryToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 bg-white/[0.08] backdrop-blur-xl border border-white/[0.12] rounded-xl shadow-xl"
+          >
+            <p className="text-sm text-white/80">
+              Welcome back! Resuming your conversation...
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Progress bar */}
       <ProgressBar progress={progress} />
+
+      {/* Memory feedback - captured insights */}
+      {capturedInsights.length > 0 && (
+        <div className="px-4 pt-4">
+          <MemoryBubbles insights={capturedInsights} />
+        </div>
+      )}
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">

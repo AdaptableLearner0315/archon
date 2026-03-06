@@ -45,6 +45,7 @@ export default function ActivityItem({
   prefersReducedMotion = false,
 }: ActivityItemProps) {
   const [showHighlight, setShowHighlight] = useState(isNew);
+  const [relativeTime, setRelativeTime] = useState('--');
 
   // Remove highlight after animation completes
   useEffect(() => {
@@ -53,6 +54,16 @@ export default function ActivityItem({
       return () => clearTimeout(timer);
     }
   }, [isNew, prefersReducedMotion]);
+
+  // Calculate relative time on client only to avoid hydration mismatch
+  useEffect(() => {
+    setRelativeTime(formatRelativeTime(item.timestamp));
+    // Update every minute to keep time fresh
+    const interval = setInterval(() => {
+      setRelativeTime(formatRelativeTime(item.timestamp));
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [item.timestamp]);
 
   const transitionDuration = prefersReducedMotion ? 0 : 0.4;
 
@@ -83,8 +94,8 @@ export default function ActivityItem({
       {/* Bottom line: Action | Time */}
       <div className="flex items-center justify-between gap-2 pl-3">
         <span className="text-white/40 truncate">{item.action}</span>
-        <span className="text-white/25 flex-shrink-0">
-          {formatRelativeTime(item.timestamp)}
+        <span className="text-white/25 flex-shrink-0" suppressHydrationWarning>
+          {relativeTime}
         </span>
       </div>
     </motion.div>

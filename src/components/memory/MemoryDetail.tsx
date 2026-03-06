@@ -21,6 +21,7 @@ export function MemoryDetail({ memory, onArchive, onBoost, onEdit }: MemoryDetai
         </div>
         <div className="flex items-center gap-2 text-xs text-white/40">
           <span className="px-2 py-0.5 bg-white/5 rounded">{memory.domain.replace('_', ' ')}</span>
+          <SourceBadge source={memory.source} />
           <span>{memory.scope}</span>
         </div>
       </div>
@@ -131,6 +132,27 @@ function SourceIcon({ source }: { source: string }) {
     <div className="p-1.5 bg-white/5 rounded-lg">
       {icons[source] || <Sparkles className="w-5 h-5 text-white/40" />}
     </div>
+  );
+}
+
+function SourceBadge({ source }: { source: string }) {
+  const config: Record<string, { bg: string; text: string; label: string }> = {
+    onboarding: { bg: 'bg-blue-500/20', text: 'text-blue-400', label: 'From Onboarding' },
+    agent: { bg: 'bg-purple-500/20', text: 'text-purple-400', label: 'Agent Learned' },
+    user: { bg: 'bg-green-500/20', text: 'text-green-400', label: 'User Added' },
+    consolidation: { bg: 'bg-amber-500/20', text: 'text-amber-400', label: 'Consolidated' },
+  };
+
+  const { bg, text, label } = config[source] || {
+    bg: 'bg-white/10',
+    text: 'text-white/50',
+    label: source,
+  };
+
+  return (
+    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${bg} ${text}`}>
+      {label}
+    </span>
   );
 }
 

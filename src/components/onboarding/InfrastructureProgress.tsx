@@ -28,6 +28,7 @@ interface InfrastructureProgressProps {
   profile?: Record<string, unknown>;
   onComplete: () => void;
   onError?: (error: string) => void;
+  onSkip?: () => void; // Optional callback for skipping infrastructure
 }
 
 interface ComponentStatus {
@@ -85,6 +86,7 @@ export function InfrastructureProgress({
   profile,
   onComplete,
   onError,
+  onSkip,
 }: InfrastructureProgressProps) {
   const [components, setComponents] = useState<ComponentStatus[]>(
     Object.keys(COMPONENT_INFO).map((type) => ({
@@ -286,6 +288,21 @@ export function InfrastructureProgress({
             transition={{ duration: 0.5 }}
           />
         </div>
+
+        {/* Skip option */}
+        {!isComplete && onSkip && (
+          <div className="mt-3 text-center">
+            <button
+              onClick={onSkip}
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors underline-offset-4 hover:underline"
+            >
+              Skip to Dashboard
+            </button>
+            <p className="text-xs text-zinc-600 mt-1">
+              You can generate assets later from the dashboard
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Component Cards */}

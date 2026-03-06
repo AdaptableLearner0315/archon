@@ -17,6 +17,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 interface OnboardingCompleteRequest {
   conversationHistory: { role: string; content: string }[];
   selectedPackage: string | null;
+  editedProfile?: ExtractedProfile; // User-reviewed profile from ProfileReview component
 }
 
 interface ExtractedProfile {
@@ -49,10 +50,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body: OnboardingCompleteRequest = await request.json();
-    const { conversationHistory, selectedPackage } = body;
+    const { conversationHistory, selectedPackage, editedProfile } = body;
 
-    // Extract profile from conversation using Claude (falls back to keyword-based)
-    const profile: ExtractedProfile = await extractProfileFromConversation(conversationHistory);
+    // Use edited profile if provided (from profile review), otherwise extract from conversation
+    const profile: ExtractedProfile = editedProfile || await extractProfileFromConversation(conversationHistory);
 
     // Generate intelligent company name via Claude
     const companyName = await generateCompanyName(profile.businessIdea || profile.businessIdeaSummary || '');

@@ -9,6 +9,78 @@ import { buildOnboardingPrompt, ATLAS_EXTRACTION_PROMPT } from '@/lib/onboarding
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
+interface MemoryInsight {
+  id: string;
+  category: 'business' | 'market' | 'stage' | 'audience' | 'pain';
+  label: string;
+  value: string;
+}
+
+/**
+ * Build a list of captured insights from extracted profile data.
+ */
+function buildInsightsList(data: Partial<OnboardingProfile>): MemoryInsight[] {
+  const insights: MemoryInsight[] = [];
+
+  if (data.businessDescription) {
+    insights.push({
+      id: 'business_desc',
+      category: 'business',
+      label: 'Business',
+      value: truncate(data.businessDescription, 50),
+    });
+  }
+
+  if (data.businessSummary) {
+    insights.push({
+      id: 'business_summary',
+      category: 'business',
+      label: 'Name',
+      value: data.businessSummary,
+    });
+  }
+
+  if (data.biggestPainPoint) {
+    insights.push({
+      id: 'pain_point',
+      category: 'pain',
+      label: 'Challenge',
+      value: truncate(data.biggestPainPoint, 40),
+    });
+  }
+
+  if (data.targetAudience?.primary) {
+    insights.push({
+      id: 'audience',
+      category: 'audience',
+      label: 'Audience',
+      value: truncate(data.targetAudience.primary, 30),
+    });
+  }
+
+  if (data.stage) {
+    const stageLabels: Record<string, string> = {
+      idea: 'Idea Stage',
+      mvp: 'MVP',
+      launched: 'Launched',
+      revenue: 'Revenue',
+    };
+    insights.push({
+      id: 'stage',
+      category: 'stage',
+      label: 'Stage',
+      value: stageLabels[data.stage] || data.stage,
+    });
+  }
+
+  return insights;
+}
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 3) + '...';
+}
+
 /**
  * Strip all internal markers from response text before displaying to user.
  */
@@ -106,6 +178,14 @@ export async function POST(request: NextRequest) {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: 'phase', phase: newPhase })}\n\n`)
           );
+
+          // Send captured insights for memory feedback UI
+          const insights = buildInsightsList(extractedData);
+          if (insights.length > 0) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'insights', insights })}\n\n`)
+            );
+          }
 
           // Handle completion
           if (isComplete) {

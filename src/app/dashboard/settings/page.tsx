@@ -246,6 +246,24 @@ export default function SettingsPage() {
         {/* Navigation Cards */}
         <div className="grid gap-3 mb-8">
           <Link
+            href="/dashboard/settings/profile"
+            className="flex items-center justify-between p-4 bg-card border border-border rounded-xl hover:border-primary/50 transition group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <Building2 className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Business Profile</p>
+                <p className="text-xs text-muted-foreground">
+                  Edit your business context and sync AI memories
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition" />
+          </Link>
+
+          <Link
             href="/dashboard/settings/integrations"
             className="flex items-center justify-between p-4 bg-card border border-border rounded-xl hover:border-primary/50 transition group"
           >
